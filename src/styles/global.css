@@ -1,0 +1,19 @@
+$w.onReady(function () {
+
+    const colores = [
+        "#7EA5A7", // Tarjeta 1
+        "#6089AA", // Tarjeta 2
+        "#809D55", // Tarjeta 3
+        "#8C65B3"  // Tarjeta 4
+    ];
+
+    $w("#repeater1").forEachItem(($item, itemData, index) => {
+
+        if (colores[index]) {
+            $item("#button14").style.backgroundColor = colores[index];
+            $item("#button14").style.borderColor = colores[index];
+        }
+
+    });
+
+});
