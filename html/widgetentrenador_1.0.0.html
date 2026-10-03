@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>CENTRIMERCA · Entrenador CENTRI</title>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     CENTRIMERCA — Entrenador CENTRI · v1.0.0 · 25 Agosto 2026
+     Port del "Entrenador AKIRA v1.2.0" (patrón EGAEL).
+
+     REQUIERE: centriEntrenador.web.js v1.0.0 + CentriTraining.page.js v1.0.0
+     ELEMENTO:  #htmlEntrenadorCentri (HtmlComponent)
+
+     ⚠️ ES UN IFRAME. Habla por postMessage, no por atributos. La consola
+        CENTRI usa el otro mecanismo. No mezclar los patrones.
+
+     ⚠️ EL ACCESO NO LO DECIDE ESTE ARCHIVO. Lo decide _exigirAdmin() en el
+        backend contra CentriAdmins. Si no estás en esa lista, todo lo que
+        pulses aquí devolverá "No tienes acceso al entrenador de CENTRI".
+
+     CAMBIOS RESPECTO A AKIRA v1.2.0
+       1. CUATRO planos: Mercado · Producto · Trabajar · Dudas.
+       2. Paleta Centrimerca (#006166). Bai Jamjuree se mantiene.
+       3. EDICIÓN DE DOCUMENTOS — nueva. AKIRA solo sabe crear, activar y
+          borrar: corregir una errata obligaba a rehacer el documento o a
+          bajar al CMS. Usa readDocument / updateDocument.
+       4. LISTA FILTRADA POR PLANO. AKIRA muestra todos los documentos
+          mezclados; con cuatro corpus eso es ilegible. Se muestran los del
+          plano activo, con el total de los otros a la vista.
+       5. MEDIDOR DE PRESUPUESTO por plano. Es el número que avisa ANTES de
+          que un corpus empiece a truncarse en silencio.
+       6. Campo `placeholder` del alignment, que centriLogic ya devuelve.
+     ═══════════════════════════════════════════════════════════════════════ -->
+
+<link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<style>
+:root{
+  --bg:#f2f5f4;--panel:#fff;--panel2:#f7faf9;--panel3:#e9efee;
+  --line:#dde6e5;--line2:#cbd8d7;--line3:#b6c7c6;
+  --fg:#12201f;--fg2:#3a4b49;--muted:#6b7a78;--muted2:#9aa8a6;
+  --accent:#006166;--accent2:#00494d;
+  --accent-dim:rgba(0,97,102,.06);--accent-light:rgba(0,97,102,.14);
+  --hi:#b8632a;--hi-dim:rgba(184,99,42,.08);--hi-light:rgba(184,99,42,.16);
+  --green:#2b7a4b;--red:#c0504d;--amber:#a8790f;
+  --font:'Bai Jamjuree',sans-serif;--shadow:0 1px 4px rgba(0,0,0,.06);--r:8px
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--fg);font-family:var(--font);font-size:13px;line-height:1.5}
+.shell{display:flex;flex-direction:column;min-height:100vh}
+.hd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel);border-top:3px solid var(--accent);flex-wrap:wrap}
+.hd-title{font-size:15px;font-weight:700;color:var(--accent)}
+.hd-sep{color:var(--muted2)}.hd-sub{font-size:12px;color:var(--fg2)}
+.planos{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+.plano-tab{padding:6px 11px;border:1px solid var(--line2);border-radius:var(--r);background:var(--panel2);color:var(--fg2);font-family:var(--font);font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
+.plano-tab:hover{border-color:var(--line3)}
+.plano-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.status-bar{display:flex;gap:14px;padding:7px 16px;background:var(--accent-dim);border-bottom:1px solid var(--accent-light);font-size:11px;color:var(--accent);flex-wrap:wrap}
+.sb-item{display:flex;align-items:center;gap:5px}
+.sb-dot{width:5px;height:5px;border-radius:50%;background:var(--hi);opacity:.9}
+.body{flex:1;padding:16px;display:flex;flex-direction:column;gap:14px}
+.sec{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;box-shadow:var(--shadow)}
+.sec h3{font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.8px;margin:0 0 4px}
+.sec .hint{font-size:11px;color:var(--muted);margin:0 0 10px;line-height:1.45}
+textarea,select,input[type="text"]{width:100%;background:var(--panel2);color:var(--fg);border:1px solid var(--line2);border-radius:var(--r);padding:9px 11px;font-family:var(--font);font-size:13px;outline:none;resize:vertical;transition:border-color .2s}
+textarea:focus,select:focus,input:focus{border-color:var(--accent)}
+textarea::placeholder,input::placeholder{color:var(--muted2)}
+.ta-sm{min-height:70px}.ta-lg{min-height:140px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.opt{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:10px}
+.opt label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px}
+.opt select,.opt input{font-size:12px}
+.rails{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px}
+.rail{display:flex;gap:10px;align-items:flex-start;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:10px}
+.rail .txt{font-size:12px;color:var(--fg2)}
+.rail .txt b{color:var(--fg)}
+.rail .txt small{display:block;color:var(--muted);margin-top:2px;font-size:11px}
+.btn{padding:9px 16px;border:1px solid var(--accent);border-radius:var(--r);background:var(--accent);color:#fff;font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer;transition:background .15s}
+.btn:hover:not(:disabled){background:var(--accent2)}
+.btn:disabled{opacity:.5;cursor:default}
+.btn-2{background:var(--panel2);color:var(--fg2);border-color:var(--line2)}
+.btn-2:hover:not(:disabled){background:var(--panel3)}
+.btn-sm{padding:6px 12px;font-size:12px}
+.btn-danger{background:var(--panel2);color:var(--red);border-color:var(--line2)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.badge{padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600}
+.badge.draft{background:var(--hi-dim);color:var(--hi);border:1px solid var(--hi-light)}
+.badge.published{background:rgba(43,122,75,.09);color:var(--green);border:1px solid rgba(43,122,75,.2)}
+.meter{margin-top:10px;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:10px}
+.meter-hd{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:6px}
+.meter-hd b{color:var(--fg2)}
+.meter-bar{height:6px;background:var(--panel3);border-radius:3px;overflow:hidden}
+.meter-fill{height:100%;background:var(--accent);transition:width .3s,background .3s}
+.meter-fill.warn{background:var(--amber)}
+.meter-fill.over{background:var(--red)}
+.meter-note{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.4}
+.meter-note.alert{color:var(--red)}
+.res-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel2);margin-bottom:6px}
+.res-type{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
+.res-title{flex:1;font-size:12.5px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.res-chars{font-size:11px;color:var(--muted2);white-space:nowrap}
+.res-act{font-size:11px;cursor:pointer;white-space:nowrap;padding:2px 6px;border-radius:4px}
+.res-act:hover{background:var(--panel3)}
+.res-toggle.on{color:var(--green)}.res-toggle.off{color:var(--muted2)}
+.res-edit{color:var(--accent)}
+.res-del{color:var(--red)}
+.res-empty{padding:16px;text-align:center;color:var(--muted);font-size:12px}
+.dropzone{border:1.5px dashed var(--line3);border-radius:var(--r);padding:20px;text-align:center;color:var(--muted);cursor:pointer;transition:border-color .2s,background .2s;font-size:12px}
+.dropzone:hover,.dropzone.dragging{border-color:var(--accent);background:var(--accent-dim)}
+.file-info{margin-top:8px;padding:9px;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);font-size:12px}
+.file-info .err{color:var(--red)}
+.preview{margin-top:8px;max-height:150px;overflow-y:auto;padding:9px;background:var(--panel3);border-radius:var(--r);font-size:11px;color:var(--fg2);white-space:pre-wrap;font-family:ui-monospace,monospace}
+.resp{margin-top:10px;padding:12px;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r)}
+.resp-text{font-size:13px;color:var(--fg);white-space:pre-wrap;margin-bottom:8px}
+.resp-meta{font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding-top:7px}
+.collapse-hd{display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none}
+.arrow{transition:transform .2s;color:var(--muted)}
+.arrow.open{transform:rotate(90deg)}
+.collapse-body{display:none;margin-top:10px}
+.collapse-body.open{display:block}
+.ft{padding:10px 16px;border-top:1px solid var(--line);background:var(--panel);font-size:11px;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap}
+#toast{display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--fg);color:#fff;padding:9px 16px;border-radius:var(--r);font-size:12.5px;z-index:99;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+.gate{display:none;margin:16px;padding:14px;border:1px solid var(--red);border-radius:var(--r);background:rgba(192,80,77,.06);color:var(--red);font-size:13px;line-height:1.55}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <div class="hd">
+    <span class="hd-title">CENTRI</span>
+    <span class="hd-sep">·</span>
+    <span class="hd-sub">Entrenador</span>
+    <span class="badge draft" id="badgeEstado">Borrador</span>
+    <div class="planos">
+      <button class="plano-tab active" data-plano="mercado">Mercado</button>
+      <button class="plano-tab" data-plano="producto">Producto</button>
+      <button class="plano-tab" data-plano="trabajar">Trabajar con Centrimerca</button>
+      <button class="plano-tab" data-plano="dudas">Dudas</button>
+    </div>
+  </div>
+
+  <div class="status-bar">
+    <span class="sb-item"><span class="sb-dot"></span><span id="sbEstado">Cargando…</span></span>
+    <span class="sb-item"><span class="sb-dot"></span><span id="sbVersion">Versión: —</span></span>
+    <span class="sb-item"><span class="sb-dot"></span><span id="sbDocs">— documentos</span></span>
+  </div>
+
+  <div class="gate" id="gate"></div>
+
+  <div class="body" id="mainBody">
+
+    <!-- IDENTIDAD -->
+    <div class="sec">
+      <h3>Identidad — quién es CENTRI en este plano</h3>
+      <p class="hint">Solo quién es y con qué voz habla. Las reglas van en el bloque de comportamiento, y los datos concretos (precios, calibres, contactos) van al corpus: un dato escrito aquí queda congelado y se desactualiza sin que nadie lo note.</p>
+      <textarea id="promptBase" class="ta-lg" placeholder="Eres CENTRI, la inteligencia artificial de Centrimerca…"></textarea>
+
+      <div class="collapse-hd" id="pgToggle" style="margin-top:10px">
+        <span class="arrow" id="pgArrow">▶</span>
+        <span style="font-size:12px;font-weight:600;color:var(--accent)">Generar la identidad con IA</span>
+      </div>
+      <div class="collapse-body" id="pgBody">
+        <p class="hint">Describe esta parte del negocio con tus palabras. Se redactará la identidad para el plano activo.</p>
+        <textarea id="pgInput" class="ta-sm" placeholder="Describe qué debe saber hacer CENTRI en este plano, a quién atiende y con qué tono…"></textarea>
+        <div class="actions" style="margin-top:8px">
+          <button class="btn btn-sm" id="btnGenPrompt">Generar identidad</button>
+          <span id="pgStatus" style="font-size:11px;color:var(--muted)"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- COMPORTAMIENTO -->
+    <div class="sec">
+      <h3>Comportamiento</h3>
+      <p class="hint">Cómo actúa. Se mantiene separado de la identidad a propósito: cuando una respuesta salga torcida, sabrás cuál de los dos mirar.</p>
+
+      <div class="opts">
+        <div class="opt">
+          <label>Tono</label>
+          <select id="tone">
+            <option value="formal">Formal</option>
+            <option value="directo">Directo</option>
+            <option value="cercano">Cercano</option>
+          </select>
+        </div>
+        <div class="opt">
+          <label>Nivel de detalle</label>
+          <select id="detailLevel">
+            <option value="breve">Breve</option>
+            <option value="medio">Medio</option>
+            <option value="extenso">Extenso</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="rails" style="margin-top:10px">
+        <label class="rail"><input type="checkbox" id="grNoInvent" checked><span class="txt"><b>No inventar</b><small>Si no está en el corpus, lo dice en vez de deducirlo.</small></span></label>
+        <label class="rail"><input type="checkbox" id="grNoMarkdown" checked><span class="txt"><b>Sin markdown</b><small>Texto plano, sin viñetas ni emojis.</small></span></label>
+        <label class="rail"><input type="checkbox" id="grOnlyQuery" checked><span class="txt"><b>Solo consulta</b><small>No ofrece tramitar, reservar ni registrar nada.</small></span></label>
+        <label class="rail"><input type="checkbox" id="grConcision"><span class="txt"><b>Anti-verborrea</b><small>Va al resultado sin narrar el razonamiento.</small></span></label>
+      </div>
+
+      <textarea id="extraInstructions" class="ta-sm" style="margin-top:10px" placeholder="Reglas concretas de este plano. Ejemplo: si preguntan por precios del día, remitir al comercial."></textarea>
+    </div>
+
+    <!-- BIENVENIDA -->
+    <div class="sec">
+      <h3>Pantalla de bienvenida</h3>
+      <p class="hint">Lo que ve el usuario al abrir este plano. Si lo dejas en blanco, la consola conserva su texto de fábrica: un campo vacío por descuido no puede dejar la pantalla muda.</p>
+      <div class="row2">
+        <div>
+          <input type="text" id="welcomeTitle" placeholder="Título (ej. CENTRI · Producto)">
+        </div>
+        <div>
+          <input type="text" id="placeholder" placeholder="Texto del campo de escritura">
+        </div>
+      </div>
+      <textarea id="welcomeText" class="ta-sm" style="margin-top:10px" placeholder="Frase de bienvenida de este plano…"></textarea>
+    </div>
+
+    <!-- PROBAR -->
+    <div class="sec">
+      <h3>Probar</h3>
+      <p class="hint">Prueba la configuración que tienes en pantalla, sin publicarla. Tres o cuatro vueltas de prueba y ajuste suelen bastar: cuando una corrección se repita, conviértela en regla arriba en vez de volver a explicarla.</p>
+      <textarea id="testPrompt" class="ta-sm" placeholder="Escribe una pregunta como la haría un cliente…"></textarea>
+      <div class="actions" style="margin-top:8px">
+        <button class="btn btn-sm" id="btnTest">Probar respuesta</button>
+      </div>
+      <div class="resp" id="testResponse" style="display:none">
+        <div class="resp-text" id="respText"></div>
+        <div class="resp-meta">
+          <div id="respConfig"></div>
+          <div id="respGuardrails"></div>
+          <div id="respTime"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CORPUS -->
+    <div class="sec">
+      <h3>Conocimiento del plano <span id="docsCount" style="color:var(--muted);font-weight:400"></span></h3>
+      <p class="hint">Los documentos de este plano. Cada plano tiene el suyo y no se mezclan: un documento guardado en el plano equivocado contamina las respuestas del otro sin dar ningún error.</p>
+
+      <div class="meter">
+        <div class="meter-hd"><span>Presupuesto de este plano</span><span><b id="meterChars">0</b> / <span id="meterTope">0</span> caracteres</span></div>
+        <div class="meter-bar"><div class="meter-fill" id="meterFill" style="width:0%"></div></div>
+        <div class="meter-note" id="meterNote">Lo que exceda el presupuesto se recorta al construir la respuesta.</div>
+      </div>
+
+      <div id="docsList" style="margin-top:10px"></div>
+      <div id="otrosPlanos" style="font-size:11px;color:var(--muted);margin-bottom:8px"></div>
+
+      <div class="actions">
+        <button class="btn btn-sm btn-2" id="btnAddDoc">+ Añadir documento</button>
+      </div>
+
+      <!-- ALTA / EDICIÓN -->
+      <div id="docForm" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">
+        <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px" id="docFormTitle">Nuevo documento</div>
+
+        <div class="opts">
+          <div class="opt">
+            <label>Título</label>
+            <input type="text" id="nrTitle" placeholder="Ej. Calendario de temporada">
+          </div>
+          <div class="opt">
+            <label>Tipo</label>
+            <select id="nrTipo">
+              <option value="catalogo">Catálogo</option>
+              <option value="procedimiento">Procedimiento</option>
+              <option value="faq">FAQ</option>
+              <option value="mercado">Mercado</option>
+              <option value="identidad">Identidad</option>
+              <option value="otro">Otro</option>
+            </select>
+          </div>
+          <div class="opt">
+            <label>Plano</label>
+            <select id="nrModo">
+              <option value="mercado">Mercado</option>
+              <option value="producto">Producto</option>
+              <option value="trabajar">Trabajar con Centrimerca</option>
+              <option value="dudas">Dudas</option>
+            </select>
+          </div>
+        </div>
+
+        <input type="text" id="nrResumen" style="margin-top:10px" placeholder="Resumen breve (opcional)">
+
+        <div class="dropzone" id="dropzone" style="margin-top:10px">
+          Arrastra un archivo o haz clic — .txt, .md o .docx (máx. 5 MB)
+        </div>
+        <input type="file" id="fileInput" accept=".txt,.md,.docx" style="display:none">
+        <div class="file-info" id="fileInfo" style="display:none">
+          <div><b id="fiName"></b> · <span id="fiSize"></span></div>
+          <div id="fiStatus"></div>
+          <div class="err" id="fiError"></div>
+        </div>
+        <div id="nrExtracted" style="display:none">
+          <div class="preview" id="nrPreview"></div>
+        </div>
+
+        <textarea id="nrContenido" class="ta-lg" style="margin-top:10px" placeholder="O pega aquí el contenido…"></textarea>
+
+        <div class="actions" style="margin-top:10px">
+          <button class="btn btn-sm" id="btnSaveDoc">Guardar documento</button>
+          <button class="btn btn-sm btn-2" id="btnCancelDoc">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PUBLICAR -->
+    <div class="sec">
+      <h3>Guardar y publicar</h3>
+      <p class="hint">Guardar deja un borrador de este plano. Publicar es lo que hace que CENTRI empiece a usarlo — en la siguiente pregunta, sin desplegar nada. Publicar un plano no toca a los otros tres.</p>
+      <div class="actions">
+        <button class="btn btn-2" id="btnSave">Guardar borrador</button>
+        <button class="btn" id="btnPublish">Publicar</button>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="ft">
+    <span>Plano: <b id="ftPlano">—</b></span>
+    <span>Versión publicada: <b id="ftVersion">—</b></span>
+    <span>Publicado: <b id="ftPublicado">—</b></span>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── Estado ──────────────────────────────────────────────────────────────
+var PLANOS = ['mercado','producto','trabajar','dudas'];
+var ETIQUETA = {mercado:'Mercado',producto:'Producto',trabajar:'Trabajar con Centrimerca',dudas:'Dudas'};
+
+// ⚠️ ESPEJO de DOC_CHARS_POR_PLANO en centriLogic.web.js. Si allí cambian,
+// aquí también: si no, el medidor mentirá y volveremos al truncado ciego.
+var TOPES = {mercado:90000,producto:90000,trabajar:60000,dudas:60000};
+
+var planoActivo = 'mercado';
+var currentAlignmentId = '';
+var documentos = [];
+var extractedContent = '';
+var editandoId = '';          // '' = alta; con valor = edición
+
+var $ = function(id){ return document.getElementById(id); };
+
+function toast(msg, ms){
+  var t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  setTimeout(function(){ t.style.display = 'none'; }, ms || 2400);
+}
+
+function send(type, data){
+  parent.postMessage(Object.assign({type:type}, data || {}), '*');
+}
+
+function collectConfig(){
+  return {
+    modo: planoActivo,
+    promptBase: $('promptBase').value,
+    extraInstructions: $('extraInstructions').value,
+    tone: $('tone').value,
+    detailLevel: $('detailLevel').value,
+    grOnlyQuery: $('grOnlyQuery').checked,
+    grNoInvent: $('grNoInvent').checked,
+    grNoMarkdown: $('grNoMarkdown').checked,
+    grConcision: $('grConcision').checked,
+    welcomeTitle: $('welcomeTitle').value,
+    welcomeText: $('welcomeText').value,
+    placeholder: $('placeholder').value
+  };
+}
+
+function clearForm(){
+  $('promptBase').value=''; $('extraInstructions').value='';
+  $('welcomeTitle').value=''; $('welcomeText').value=''; $('placeholder').value='';
+  $('tone').value='directo'; $('detailLevel').value='medio';
+  $('grOnlyQuery').checked=true; $('grNoInvent').checked=true;
+  $('grNoMarkdown').checked=true; $('grConcision').checked=false;
+  $('testResponse').style.display='none';
+  currentAlignmentId='';
+}
+
+function populateForm(cfg){
+  if(!cfg) return;
+  $('promptBase').value = cfg.promptBase || '';
+  $('extraInstructions').value = cfg.extraInstructions || '';
+  $('welcomeTitle').value = cfg.welcomeTitle || '';
+  $('welcomeText').value = cfg.welcomeText || '';
+  $('placeholder').value = cfg.placeholder || '';
+  $('tone').value = cfg.tone || 'directo';
+  $('detailLevel').value = cfg.detailLevel || 'medio';
+  $('grOnlyQuery').checked  = cfg.grOnlyQuery  !== false;
+  $('grNoInvent').checked   = cfg.grNoInvent   !== false;
+  $('grNoMarkdown').checked = cfg.grNoMarkdown !== false;
+  $('grConcision').checked  = cfg.grConcision  === true;
+}
+
+// ── Corpus ──────────────────────────────────────────────────────────────
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+function renderMeter(){
+  var chars = documentos.filter(function(d){ return d.modo===planoActivo && d.activo; })
+                        .reduce(function(n,d){ return n + (d.chars||0); }, 0);
+  var tope = TOPES[planoActivo] || 12000;
+  var pct = Math.min(100, Math.round(chars/tope*100));
+
+  $('meterChars').textContent = chars.toLocaleString('es-ES');
+  $('meterTope').textContent = tope.toLocaleString('es-ES');
+  var fill = $('meterFill');
+  fill.style.width = pct + '%';
+  fill.className = 'meter-fill' + (chars > tope ? ' over' : (pct >= 80 ? ' warn' : ''));
+
+  var note = $('meterNote');
+  if (chars > tope){
+    note.className = 'meter-note alert';
+    note.textContent = 'Por encima del presupuesto: ' + (chars-tope).toLocaleString('es-ES') +
+      ' caracteres no llegarán a la respuesta. Desactiva o acorta documentos de este plano.';
+  } else if (pct >= 80){
+    note.className = 'meter-note alert';
+    note.textContent = 'Cerca del límite. Quedan ' + (tope-chars).toLocaleString('es-ES') + ' caracteres.';
+  } else {
+    note.className = 'meter-note';
+    note.textContent = 'Lo que exceda el presupuesto se recorta al construir la respuesta.';
+  }
+}
+
+function renderDocs(){
+  var delPlano = documentos.filter(function(d){ return d.modo === planoActivo; });
+  var activos = delPlano.filter(function(d){ return d.activo; }).length;
+  var list = $('docsList');
+
+  if (delPlano.length === 0){
+    list.innerHTML = '<div class="res-empty">Este plano no tiene documentos todavía.</div>';
+  } else {
+    var html = '';
+    for (var i=0;i<delPlano.length;i++){
+      var d = delPlano[i];
+      html += '<div class="res-item">' +
+        '<span class="res-type">' + esc(d.tipo||'doc') + '</span>' +
+        '<span class="res-title">' + esc(d.titulo||'Sin título') + '</span>' +
+        '<span class="res-chars">' + (d.chars||0).toLocaleString('es-ES') + ' car.</span>' +
+        '<span class="res-act res-edit" data-id="'+d.id+'">editar</span>' +
+        '<span class="res-act res-toggle ' + (d.activo?'on':'off') + '" data-id="'+d.id+'" data-activo="'+(d.activo?'true':'false')+'">' +
+          (d.activo?'● activo':'○ inactivo') + '</span>' +
+        '<span class="res-act res-del" data-id="'+d.id+'">✕</span>' +
+      '</div>';
+    }
+    list.innerHTML = html;
+
+    list.querySelectorAll('.res-edit').forEach(function(el){
+      el.addEventListener('click', function(){ send('readDocument',{documentoId:this.dataset.id}); });
+    });
+    list.querySelectorAll('.res-toggle').forEach(function(el){
+      el.addEventListener('click', function(){
+        send('toggleDocument',{documentoId:this.dataset.id, activo:this.dataset.activo!=='true'});
+      });
+    });
+    list.querySelectorAll('.res-del').forEach(function(el){
+      el.addEventListener('click', function(){
+        if(confirm('¿Eliminar este documento? No se puede deshacer.'))
+          send('deleteDocument',{documentoId:this.dataset.id});
+      });
+    });
+  }
+
+  $('docsCount').textContent = '(' + activos + ' activos de ' + delPlano.length + ')';
+  $('sbDocs').textContent = activos + ' documentos activos en ' + ETIQUETA[planoActivo];
+
+  // Los otros planos, a la vista: es donde aparece el documento que alguien
+  // guardó en el sitio equivocado.
+  var otros = [];
+  for (var j=0;j<PLANOS.length;j++){
+    var p = PLANOS[j];
+    if (p === planoActivo) continue;
+    var n = documentos.filter(function(d){ return d.modo===p; }).length;
+    if (n) otros.push(ETIQUETA[p] + ': ' + n);
+  }
+  $('otrosPlanos').textContent = otros.length ? 'En otros planos — ' + otros.join(' · ') : '';
+
+  renderMeter();
+}
+
+// ── Ficheros ────────────────────────────────────────────────────────────
+function fileSizeStr(b){
+  if(b<1024) return b+' B';
+  if(b<1048576) return Math.ceil(b/1024)+' KB';
+  return (b/1048576).toFixed(1)+' MB';
+}
+
+function showExtracted(text){
+  $('nrExtracted').style.display='block';
+  $('nrPreview').textContent = text.length>2000
+    ? text.substring(0,2000)+'…\n['+text.length+' caracteres en total]'
+    : text;
+  $('nrContenido').value = text;
+}
+
+function processFile(file){
+  extractedContent='';
+  $('fileInfo').style.display='block';
+  $('fiName').textContent=file.name;
+  $('fiSize').textContent=fileSizeStr(file.size);
+  $('fiStatus').textContent='Procesando…';
+  $('fiError').textContent='';
+  $('nrExtracted').style.display='none';
+  if(!$('nrTitle').value.trim()) $('nrTitle').value = file.name.replace(/\.[^.]+$/,'');
+
+  var ext = file.name.split('.').pop().toLowerCase();
+  if(file.size > 5*1048576){
+    $('fiStatus').textContent=''; $('fiError').textContent='Archivo demasiado grande (máx. 5 MB)'; return;
+  }
+  if(ext==='txt'||ext==='md'){
+    var r=new FileReader();
+    r.onload=function(e){ extractedContent=e.target.result; showExtracted(extractedContent);
+      $('fiStatus').textContent='Extraído ('+extractedContent.length+' caracteres)'; };
+    r.onerror=function(){ $('fiError').textContent='Error leyendo el archivo'; $('fiStatus').textContent=''; };
+    r.readAsText(file); return;
+  }
+  if(ext==='docx'){
+    var r2=new FileReader();
+    r2.onload=function(e){
+      mammoth.extractRawText({arrayBuffer:e.target.result}).then(function(result){
+        extractedContent=result.value; showExtracted(extractedContent);
+        $('fiStatus').textContent='DOCX extraído ('+extractedContent.length+' caracteres)';
+      }).catch(function(err){
+        $('fiError').textContent='Error leyendo el DOCX: '+err.message; $('fiStatus').textContent='';
+      });
+    };
+    r2.onerror=function(){ $('fiError').textContent='Error leyendo el archivo'; $('fiStatus').textContent=''; };
+    r2.readAsArrayBuffer(file); return;
+  }
+  $('fiStatus').textContent='';
+  $('fiError').textContent='Formato no soportado. Usa .txt, .md o .docx';
+}
+
+function abrirFormDoc(modoEdicion){
+  editandoId = modoEdicion || '';
+  $('docForm').style.display='block';
+  $('docFormTitle').textContent = editandoId ? 'Editar documento' : 'Nuevo documento';
+  $('btnSaveDoc').textContent = editandoId ? 'Guardar cambios' : 'Guardar documento';
+}
+
+function clearDocForm(){
+  editandoId='';
+  $('nrTitle').value=''; $('nrTipo').value='catalogo';
+  $('nrModo').value=planoActivo; $('nrResumen').value=''; $('nrContenido').value='';
+  $('fileInput').value=''; extractedContent='';
+  $('fileInfo').style.display='none'; $('nrExtracted').style.display='none';
+  $('docForm').style.display='none';
+}
+
+function updateStatus(pub){
+  $('ftPlano').textContent = ETIQUETA[planoActivo] || planoActivo;
+  if(pub){
+    $('sbVersion').textContent='Versión: v'+(pub.version||'?');
+    $('ftVersion').textContent='v'+(pub.version||'?');
+    $('ftPublicado').textContent = pub.publicationDate
+      ? new Date(pub.publicationDate).toLocaleString('es-ES') : '—';
+  } else {
+    $('sbVersion').textContent='Versión: —';
+    $('ftVersion').textContent='—';
+    $('ftPublicado').textContent='—';
+  }
+}
+
+function bloquear(motivo){
+  $('mainBody').style.display='none';
+  var g=$('gate');
+  g.style.display='block';
+  g.textContent = motivo + ' — el acceso al entrenador se controla desde la colección CentriAdmins.';
+}
+
+// ── Mensajes ────────────────────────────────────────────────────────────
+window.addEventListener('message', function(event){
+  var msg = event.data;
+  if(!msg || typeof msg!=='object') return;
+  var p = msg.payload;
+
+  if(msg.type==='configLoaded'){
+    if(!p||!p.ok){
+      // El backend deniega el acceso con el mismo canal que cualquier error.
+      // Si es una denegación, se tapa la pantalla en vez de dejar botones
+      // que fallarán uno a uno.
+      if(p && p.error && /acceso|sesión/i.test(p.error)) return bloquear(p.error);
+      toast('Error: '+(p?p.error:'desconocido')); return;
+    }
+    if(p.plano) planoActivo = p.plano;
+    clearForm();
+    var cfg = p.borrador || p.publicada;
+    if(cfg){
+      populateForm(cfg);
+      currentAlignmentId = cfg._id || '';
+      var esPub = cfg.status==='publicado';
+      $('sbEstado').textContent = esPub ? 'Configuración publicada' : 'Borrador';
+      var b=$('badgeEstado');
+      b.textContent = esPub ? 'Publicado' : 'Borrador';
+      b.className = 'badge ' + (esPub ? 'published' : 'draft');
+    } else {
+      $('sbEstado').textContent='Sin configurar';
+      $('badgeEstado').textContent='Sin configurar';
+      $('badgeEstado').className='badge draft';
+    }
+    updateStatus(p.publicada);
+    documentos = p.documentos || [];
+    $('nrModo').value = planoActivo;
+    renderDocs();
+    return;
+  }
+
+  if(msg.type==='configSaved'){
+    $('btnSave').disabled=false;
+    if(!p||!p.ok){ toast('Error: '+(p?p.error:'?')); return; }
+    currentAlignmentId=p.alignmentId;
+    $('badgeEstado').textContent='Borrador';
+    $('badgeEstado').className='badge draft';
+    $('sbEstado').textContent='Borrador guardado';
+    toast('Borrador guardado');
+    return;
+  }
+
+  if(msg.type==='configPublished'){
+    $('btnPublish').disabled=false;
+    if(!p||!p.ok){ toast('Error: '+(p?p.error:'?')); return; }
+    $('badgeEstado').textContent='Publicado';
+    $('badgeEstado').className='badge published';
+    $('sbEstado').textContent='Publicado v'+p.version;
+    $('sbVersion').textContent='Versión: v'+p.version;
+    $('ftVersion').textContent='v'+p.version;
+    $('ftPublicado').textContent=new Date().toLocaleString('es-ES');
+    toast('Publicado v'+p.version+'. CENTRI lo usa desde la siguiente pregunta.');
+    return;
+  }
+
+  if(msg.type==='testResult'){
+    $('btnTest').disabled=false; $('btnTest').textContent='Probar respuesta';
+    if(!p||!p.ok){ toast('Error: '+(p?p.error:'?')); return; }
+    $('testResponse').style.display='block';
+    $('respText').textContent=p.response;
+    var c=p.config||{};
+    $('respConfig').textContent='Tono: '+(c.tone||'?')+' · Detalle: '+(c.detailLevel||'?')+' · Plano: '+(ETIQUETA[p.plano]||p.plano);
+    $('respGuardrails').textContent='Guardrails: '+((c.guardrails||[]).join(', ')||'ninguno');
+    $('respTime').textContent='Tiempo: '+(p.timeMs||'?')+' ms · Documentos: '+(p.documentsCount||0)+
+      ' · Corpus: '+(p.corpusChars||0).toLocaleString('es-ES')+' car. · Prompt: '+(p.systemPromptLength||'?')+' car.';
+    return;
+  }
+
+  if(msg.type==='promptGenerated'){
+    $('btnGenPrompt').disabled=false; $('btnGenPrompt').textContent='Generar identidad';
+    if(!p||!p.ok){ $('pgStatus').textContent='Error: '+(p?p.error:'?'); $('pgStatus').style.color='var(--red)'; return; }
+    $('promptBase').value=p.prompt;
+    $('pgStatus').textContent='Generada — revísala antes de guardar';
+    $('pgStatus').style.color='var(--green)';
+    return;
+  }
+
+  if(msg.type==='documentCreated'){
+    $('btnSaveDoc').disabled=false;
+    if(!p||!p.ok){ toast('Error: '+(p?p.error:'?')); return; }
+    documentos.push(p.documento);
+    renderDocs(); clearDocForm();
+    toast('Documento "'+p.documento.titulo+'" creado');
+    return;
+  }
+
+  if(msg.type==='documentRead'){
+    if(!p||!p.ok){ toast('Error: '+(p?p.error:'?')); return; }
+    var d=p.documento;
+    abrirFormDoc(d.id);
+    $('nrTitle').value=d.titulo; $('nrTipo').value=d.tipo||'otro';
+    $('nrModo').value=d.modo; $('nrResumen').value=d.resumen;
+    $('nrContenido').value=d.contenido; extractedContent='';
+    $('fileInfo').style.display='none'; $('nrExtracted').style.display='none';
+    $('docForm').scrollIntoView({behavior:'smooth', block:'nearest'});
+    return;
+  }
+
+  if(msg.type==='documentUpdated'){
+    $('btnSaveDoc').disabled=false;
+    if(!p||!p.ok){ toast('Error: '+(p?p.error:'?')); return; }
+    for(var i=0;i<documentos.length;i++){
+      if(documentos[i].id===p.documento.id){ documentos[i]=p.documento; break; }
+    }
+    renderDocs(); clearDocForm();
+    toast('Documento actualizado');
+    return;
+  }
+
+  if(msg.type==='documentToggled'){
+    if(!p||!p.ok){ toast('Error: '+(p?p.error:'?')); return; }
+    for(var k=0;k<documentos.length;k++){
+      if(documentos[k].id===p.documentoId){ documentos[k].activo=p.activo; break; }
+    }
+    renderDocs();
+    toast(p.activo?'Documento activado':'Documento desactivado');
+    return;
+  }
+
+  if(msg.type==='documentDeleted'){
+    if(!p||!p.ok){ toast('Error: '+(p?p.error:'?')); return; }
+    var id = msg.documentoId || p.documentoId;
+    documentos = documentos.filter(function(d){ return d.id!==id; });
+    renderDocs();
+    toast('Documento eliminado');
+    return;
+  }
+
+  if(msg.type==='error'){
+    toast('Error: '+(p?p.error:'desconocido'));
+    ['btnTest','btnSave','btnPublish','btnGenPrompt','btnSaveDoc'].forEach(function(b){ $(b).disabled=false; });
+    $('btnTest').textContent='Probar respuesta';
+    $('btnGenPrompt').textContent='Generar identidad';
+  }
+});
+
+// ── Eventos ─────────────────────────────────────────────────────────────
+$('btnSave').addEventListener('click', function(){
+  this.disabled=true; send('saveConfig',{config:collectConfig()});
+});
+
+$('btnPublish').addEventListener('click', function(){
+  if(!currentAlignmentId){ toast('Guarda un borrador antes de publicar'); return; }
+  this.disabled=true; send('publishConfig',{alignmentId:currentAlignmentId});
+});
+
+$('btnTest').addEventListener('click', function(){
+  var q=$('testPrompt').value.trim();
+  if(!q){ toast('Escribe una pregunta de prueba'); return; }
+  this.disabled=true; this.textContent='Probando…';
+  $('testResponse').style.display='none';
+  send('testPrompt',{message:q, configOverride:collectConfig(), modo:planoActivo});
+});
+
+$('pgToggle').addEventListener('click', function(){
+  $('pgBody').classList.toggle('open'); $('pgArrow').classList.toggle('open');
+});
+
+$('btnGenPrompt').addEventListener('click', function(){
+  var d=$('pgInput').value.trim();
+  if(d.length<20){ toast('Describe esta parte del negocio con al menos unas frases'); return; }
+  this.disabled=true; this.textContent='Generando…'; $('pgStatus').textContent='';
+  send('generatePrompt',{descripcion:d, modo:planoActivo});
+});
+
+$('btnAddDoc').addEventListener('click', function(){
+  clearDocForm(); abrirFormDoc('');
+});
+$('btnCancelDoc').addEventListener('click', clearDocForm);
+
+$('fileInput').addEventListener('change', function(){ if(this.files[0]) processFile(this.files[0]); });
+
+var dz=$('dropzone');
+dz.addEventListener('click', function(){ $('fileInput').click(); });
+dz.addEventListener('dragenter', function(e){ e.preventDefault(); this.classList.add('dragging'); });
+dz.addEventListener('dragover',  function(e){ e.preventDefault(); });
+dz.addEventListener('dragleave', function(){ this.classList.remove('dragging'); });
+dz.addEventListener('drop', function(e){
+  e.preventDefault(); this.classList.remove('dragging');
+  if(e.dataTransfer && e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]);
+});
+
+$('btnSaveDoc').addEventListener('click', function(){
+  var titulo=$('nrTitle').value.trim();
+  if(!titulo){ toast('El título es obligatorio'); return; }
+  var contenido = extractedContent || $('nrContenido').value.trim();
+  if(!contenido){ toast('Escribe o sube el contenido'); return; }
+
+  this.disabled=true;
+  var datos = {
+    titulo: titulo,
+    tipo: $('nrTipo').value,
+    modo: $('nrModo').value,
+    contenido: contenido,
+    resumen: $('nrResumen').value.trim() || titulo
+  };
+
+  if(editandoId){
+    datos.documentoId = editandoId;
+    send('updateDocument', datos);
+  } else {
+    send('createDocument', datos);
+  }
+});
+
+// ── Alto del iframe ─────────────────────────────────────────────────────
+var lastH=0;
+function notifyHeight(){
+  var h=document.documentElement.scrollHeight;
+  if(h!==lastH){ lastH=h; send('resize',{height:h}); }
+}
+var ro=new ResizeObserver(notifyHeight); ro.observe(document.body);
+
+// ── Selector de plano ───────────────────────────────────────────────────
+// Cada plano tiene su propia fila de alignment. Al cambiar de pestaña se
+// recarga desde el backend, y el formulario se limpia ANTES de poblarlo para
+// no dejar a la vista texto del plano anterior.
+function setPlano(p){
+  if(!p || p===planoActivo) return;
+  planoActivo=p;
+  document.querySelectorAll('.plano-tab').forEach(function(t){
+    t.classList.toggle('active', t.dataset.plano===p);
+  });
+  clearForm(); clearDocForm();
+  $('sbEstado').textContent='Cargando…';
+  send('ready',{modo:p});
+}
+document.querySelectorAll('.plano-tab').forEach(function(t){
+  t.addEventListener('click', function(){ setPlano(this.dataset.plano); });
+});
+
+send('ready',{modo:planoActivo});
+</script>
+</body>
+</html>
