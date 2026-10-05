@@ -1,9 +1,16 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * CENTRIMERCA — Comunicaciones (email vía Brevo) · Backend web module · v1.0.2
+ * CENTRIMERCA — Comunicaciones (email vía Brevo) · Backend web module · v1.0.3
  * Ruta: backend/centriComunicaciones.web.js
  * FECHA: 5 Octubre 2026
  *
  * REQUIERE: Comunicaciones.page.js v1.0.1 + Comunicaciones_Centrimerca_v1_0_2.html
+ *
+ * v1.0.3 (5 Oct 2026):
+ *   - header: '' al crear/actualizar la campaña, para que Brevo no añada su
+ *     cabecera por defecto («Si usted no es capaz de ver este email…»), que
+ *     duplica el enlace de versión web de la plantilla. El parámetro `header`
+ *     está documentado; que el valor vacío la suprima se comprueba en la
+ *     siguiente prueba (si sigue saliendo, se revierte).
  *
  * v1.0.2 (5 Oct 2026):
  *   - listarCampanias adjunta `datos` (los valores del formulario guardados en
@@ -74,7 +81,7 @@ import { currentMember } from 'wix-members-backend';
 import { getSecret } from 'wix-secrets-backend';
 import { fetch } from 'wix-fetch';
 
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const TAG = `[Comunicaciones][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -393,7 +400,8 @@ async function _guardarEnBrevo(campania, remitente) {
     sender: remitente.nombre ? { name: remitente.nombre, email: remitente.email } : { email: remitente.email },
     htmlContent: html,
     previewText: _txt(c.preheader),
-    mirrorActive: true
+    mirrorActive: true,
+    header: ''            // v1.0.3: sin cabecera por defecto de Brevo
   };
   if (remitente.replyTo) { cuerpo.replyTo = remitente.replyTo; }
   if (listIds.length)    { cuerpo.recipients = { listIds }; }
