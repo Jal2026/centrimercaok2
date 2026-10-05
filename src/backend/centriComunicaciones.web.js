@@ -1,9 +1,18 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * CENTRIMERCA — Comunicaciones (email vía Brevo) · Backend web module · v1.0.0
+ * CENTRIMERCA — Comunicaciones (email vía Brevo) · Backend web module · v1.0.1
  * Ruta: backend/centriComunicaciones.web.js
  * FECHA: 5 Octubre 2026
  *
- * REQUIERE: Comunicaciones.page.js v1.0.0 + Comunicaciones_Centrimerca_v1_0_0.html
+ * REQUIERE: Comunicaciones.page.js v1.0.1 + Comunicaciones_Centrimerca_v1_0_1.html
+ *
+ * v1.0.1 (5 Oct 2026):
+ *   - Borrador recuperable. Guardar borrador y enviar prueba escriben una fila
+ *     en CentriCampanias con los valores del formulario (Brevo solo guarda el
+ *     HTML montado). cargarComunicaciones devuelve el último borrador y el
+ *     widget lo restaura. Enviar/programar marca la fila como enviada/programada.
+ *   - Nuevo descartarBorradorCampania: marca la fila como 'descartado'.
+ *   - Si la campaña guardada ya no existe en Brevo (borrada desde su panel),
+ *     se crea una nueva en vez de fallar.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * PROCEDENCIA
@@ -44,6 +53,8 @@
  * ───────────────────────────────────────────────────────────────────────────
  *   CentriConfig (fila única): remitenteNombre, remitenteEmail, remitenteReplyTo
  *   CentriPlantillas: nombre, descripcion, html, campos (JSON texto), activa, orden
+ *   CentriCampanias: campaignId, plantillaId, nombre, asunto, preheader,
+ *                    valores (JSON texto), listas (JSON texto), estado  (v1.0.1)
  *   CentriAdmins: email, memberId, activo  (guard)
  *   Secreto: BREVO_CENTRIMERCA
  * ═══════════════════════════════════════════════════════════════════════════
@@ -56,13 +67,14 @@ import { currentMember } from 'wix-members-backend';
 import { getSecret } from 'wix-secrets-backend';
 import { fetch } from 'wix-fetch';
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const TAG = `[Comunicaciones][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
 // ── IDs de colección ───────────────────────────────────────────────────────
 const C_CONFIG     = 'CentriConfig';       // fila única
 const C_PLANTILLAS = 'CentriPlantillas';
+const C_CAMPANIAS  = 'CentriCampanias';    // v1.0.1: estado del formulario por campaña
 const C_ADMINS     = 'CentriAdmins';       // idéntico al catálogo/actualidad
 
 // ── Secreto y API ──────────────────────────────────────────────────────────
@@ -184,6 +196,78 @@ function _parseCampos(v) {
     try { x = JSON.parse(s); } catch (e) { return []; }
   }
   return Array.isArray(x) ? x : [];
+}
+
+/* v1.0.1: JSON en campo de Texto, parseado en bucle como _parseCampos.
+   Devuelve `defecto` si no se puede leer. */
+function _parseJson(v, defecto) {
+  let x = v;
+  for (let i = 0; i < 3 && typeof x === 'string'; i++) {
+    const s = x.trim();
+    if (!s) { return defecto; }
+    try { x = JSON.parse(s); } catch (e) { return defecto; }
+  }
+  return (x === null || x === undefined) ? defecto : x;
+}
+
+/* v1.0.1: guarda en CentriCampanias el estado del formulario de una campaña.
+   Una fila por campaignId: READ-MERGE-UPDATE si existe, insert si no.
+   Devuelve { ok } o { ok:false, error }. No lanza. */
+async function _guardarFila(campania, campaignId, estado) {
+  try {
+    const c = campania || {};
+    const datos = {
+      campaignId: String(campaignId),
+      plantillaId: _txt(c.plantillaId),
+      nombre: _txt(c.nombre),
+      asunto: _txt(c.asunto),
+      preheader: _txt(c.preheader),
+      valores: JSON.stringify((c.valores && typeof c.valores === 'object') ? c.valores : {}),
+      listas: JSON.stringify((Array.isArray(c.listas) ? c.listas : []).map(String)),
+      estado
+    };
+    const res = await wixData.query(C_CAMPANIAS).eq('campaignId', String(campaignId)).limit(1).find(AUTH);
+    const fila = res.items && res.items[0];
+    if (fila) {
+      await wixData.update(C_CAMPANIAS, Object.assign({}, fila, datos), AUTH);
+    } else {
+      await wixData.insert(C_CAMPANIAS, datos, AUTH);
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error(`${TAG} ❌ no se pudo guardar ${C_CAMPANIAS} (campaña ${campaignId}):`, e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+/* v1.0.1: cambia solo el estado de la fila (enviada, programada, descartado). */
+async function _marcarEstado(campaignId, estado) {
+  try {
+    const res = await wixData.query(C_CAMPANIAS).eq('campaignId', String(campaignId)).limit(1).find(AUTH);
+    const fila = res.items && res.items[0];
+    if (!fila) { return { ok: true }; }
+    await wixData.update(C_CAMPANIAS, Object.assign({}, fila, { estado }), AUTH);
+    return { ok: true };
+  } catch (e) {
+    console.error(`${TAG} ❌ no se pudo marcar ${estado} en ${C_CAMPANIAS} (campaña ${campaignId}):`, e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+/* v1.0.1: último borrador sin enviar, en el formato que restaura el widget. */
+async function _leerUltimoBorrador() {
+  const res = await wixData.query(C_CAMPANIAS).eq('estado', 'borrador').descending('_updatedDate').limit(1).find(AUTH);
+  const f = res.items && res.items[0];
+  if (!f || !_txt(f.campaignId)) { return null; }
+  return {
+    campaignId: _txt(f.campaignId),
+    plantillaId: _txt(f.plantillaId),
+    nombre: _txt(f.nombre),
+    asunto: _txt(f.asunto),
+    preheader: _txt(f.preheader),
+    valores: _parseJson(f.valores, {}),
+    listas: _parseJson(f.listas, [])
+  };
 }
 
 function _emailValido(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(e || '')); }
@@ -311,8 +395,11 @@ async function _guardarEnBrevo(campania, remitente) {
 
   if (id) {
     const r = await _brevo('PUT', `/emailCampaigns/${encodeURIComponent(id)}`, cuerpo);
-    if (!r.ok) { return { ok: false, error: _errBrevo(r, 'No se pudo actualizar la campaña en Brevo') }; }
-    return { ok: true, campaignId: id };
+    if (r.ok) { return { ok: true, campaignId: id }; }
+    // v1.0.1: si la campaña ya no existe en Brevo, se crea una nueva abajo.
+    if (r.status !== 404) { return { ok: false, error: _errBrevo(r, 'No se pudo actualizar la campaña en Brevo') }; }
+    console.warn(`${TAG} la campaña ${id} ya no existe en Brevo: se crea una nueva`);
+    await _marcarEstado(id, 'descartado');
   }
 
   const r = await _brevo('POST', '/emailCampaigns', cuerpo);
@@ -336,10 +423,14 @@ export const cargarComunicaciones = webMethod(
     if (!guard.ok) { return { ok: false, error: guard.error }; }
 
     try {
-      const [remitente, resPl, resListas] = await Promise.all([
+      const [remitente, resPl, resListas, borrador] = await Promise.all([
         _leerRemitente(),
         wixData.query(C_PLANTILLAS).eq('activa', true).ascending('orden').limit(100).find(AUTH),
-        _leerListas()
+        _leerListas(),
+        _leerUltimoBorrador().catch(e => {
+          console.error(`${TAG} no se pudo leer el último borrador:`, e.message);
+          return null;
+        })
       ]);
 
       if (!resListas.ok) { return { ok: false, error: resListas.error }; }
@@ -352,8 +443,8 @@ export const cargarComunicaciones = webMethod(
         campos: _parseCampos(it.campos)
       }));
 
-      console.log(`${TAG} ✅ carga: ${plantillas.length} plantillas, ${resListas.listas.length} listas`);
-      return { ok: true, config: { remitente }, plantillas, listas: resListas.listas };
+      console.log(`${TAG} ✅ carga: ${plantillas.length} plantillas, ${resListas.listas.length} listas, borrador: ${borrador ? borrador.campaignId : 'no'}`);
+      return { ok: true, config: { remitente }, plantillas, listas: resListas.listas, borrador };
 
     } catch (e) {
       console.error(`${TAG} ❌ cargarComunicaciones:`, e.message);
@@ -373,7 +464,14 @@ export const guardarBorradorCampania = webMethod(
 
     try {
       const remitente = await _leerRemitente();
-      return await _guardarEnBrevo(campania, remitente);
+      const g = await _guardarEnBrevo(campania, remitente);
+      if (!g.ok) { return g; }
+      // v1.0.1: sin esta fila el borrador no se puede recuperar → se informa.
+      const f = await _guardarFila(campania, g.campaignId, 'borrador');
+      if (!f.ok) {
+        return { ok: false, campaignId: g.campaignId, error: `Guardado en Brevo, pero no en ${C_CAMPANIAS}: ${f.error}` };
+      }
+      return g;
     } catch (e) {
       console.error(`${TAG} ❌ guardarBorradorCampania:`, e.message);
       return { ok: false, error: e.message };
@@ -400,6 +498,7 @@ export const enviarPruebaCampania = webMethod(
       const remitente = await _leerRemitente();
       const g = await _guardarEnBrevo(campania, remitente);
       if (!g.ok) { return g; }
+      await _guardarFila(campania, g.campaignId, 'borrador');   // v1.0.1 (no bloquea la prueba)
 
       const r = await _brevo('POST', `/emailCampaigns/${encodeURIComponent(g.campaignId)}/sendTest`, { emailTo: lista });
       if (!r.ok) {
@@ -459,6 +558,7 @@ export const enviarCampania = webMethod(
       if (!programada) {
         const r = await _brevo('POST', `/emailCampaigns/${id}/sendNow`);
         if (!r.ok) { return { ok: false, campaignId: g.campaignId, error: _errBrevo(r, 'Brevo no ha aceptado el envío') }; }
+        await _guardarFila(c, g.campaignId, 'enviada');   // v1.0.1
         console.log(`${TAG} 🚀 campaña ${g.campaignId} enviada ahora (por ${guard.email || guard.memberId})`);
         return { ok: true, campaignId: g.campaignId, programada: false, fecha: '' };
       }
@@ -476,6 +576,7 @@ export const enviarCampania = webMethod(
         return { ok: false, campaignId: g.campaignId, error: `Brevo guardó la fecha pero la campaña está en estado "${estado || '—'}", no programada. Revísala en Brevo antes de reintentar.` };
       }
 
+      await _guardarFila(c, g.campaignId, 'programada');   // v1.0.1
       console.log(`${TAG} ⏰ campaña ${g.campaignId} programada para ${fechaIso} (por ${guard.email || guard.memberId})`);
       return { ok: true, campaignId: g.campaignId, programada: true, fecha: fechaIso };
 
@@ -483,6 +584,27 @@ export const enviarCampania = webMethod(
       console.error(`${TAG} ❌ enviarCampania:`, e.message);
       return { ok: false, error: e.message };
     }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4b. DESCARTAR BORRADOR (v1.0.1)
+// Solo deja de recuperarse en el gestor. La campaña sigue en Brevo como
+// borrador; se puede borrar desde su panel si se quiere.
+// ═══════════════════════════════════════════════════════════════════════════
+export const descartarBorradorCampania = webMethod(
+  Permissions.SiteMember,
+  async ({ campaignId }) => {
+    const guard = await _exigirAdmin();
+    if (!guard.ok) { return { ok: false, error: guard.error }; }
+
+    const id = _txt(campaignId);
+    if (!id) { return { ok: false, error: 'Falta campaignId.' }; }
+
+    const r = await _marcarEstado(id, 'descartado');
+    if (!r.ok) { return { ok: false, campaignId: id, error: r.error }; }
+    console.log(`${TAG} 🗑️ borrador ${id} descartado en el gestor`);
+    return { ok: true, campaignId: id };
   }
 );
 
