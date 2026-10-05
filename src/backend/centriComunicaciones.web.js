@@ -1,9 +1,16 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * CENTRIMERCA — Comunicaciones (email vía Brevo) · Backend web module · v1.0.1
+ * CENTRIMERCA — Comunicaciones (email vía Brevo) · Backend web module · v1.0.2
  * Ruta: backend/centriComunicaciones.web.js
  * FECHA: 5 Octubre 2026
  *
- * REQUIERE: Comunicaciones.page.js v1.0.1 + Comunicaciones_Centrimerca_v1_0_1.html
+ * REQUIERE: Comunicaciones.page.js v1.0.1 + Comunicaciones_Centrimerca_v1_0_2.html
+ *
+ * v1.0.2 (5 Oct 2026):
+ *   - listarCampanias adjunta `datos` (los valores del formulario guardados en
+ *     CentriCampanias) a cada campaña hecha con el gestor, sea cual sea su
+ *     estado. El widget los usa para «Duplicar como nueva campaña».
+ *   - Una campaña en cola (queued) con fecha ya pasada se devuelve como
+ *     'enviando': es el estado que deja sendNow mientras Brevo la procesa.
  *
  * v1.0.1 (5 Oct 2026):
  *   - Borrador recuperable. Guardar borrador y enviar prueba escriben una fila
@@ -67,7 +74,7 @@ import { currentMember } from 'wix-members-backend';
 import { getSecret } from 'wix-secrets-backend';
 import { fetch } from 'wix-fetch';
 
-const VERSION = '1.0.1';
+const VERSION = '1.0.2';
 const TAG = `[Comunicaciones][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -627,9 +634,37 @@ export const listarCampanias = webMethod(
       const porLista = {};
       ((rl.ok && rl.listas) || []).forEach(l => { porLista[l.id] = l.contactos; });
 
-      const campanias = (r.data.campaigns || []).map(c => {
+      // v1.0.2: datos del formulario guardados en CentriCampanias, por campaignId.
+      const brutas = r.data.campaigns || [];
+      const ids = brutas.map(c => String(c.id));
+      const porId = {};
+      if (ids.length) {
+        try {
+          const rf = await wixData.query(C_CAMPANIAS).hasSome('campaignId', ids).limit(1000).find(AUTH);
+          (rf.items || []).forEach(f => { porId[_txt(f.campaignId)] = f; });
+        } catch (e) {
+          console.error(`${TAG} no se pudo leer ${C_CAMPANIAS} para Seguimiento:`, e.message);
+        }
+      }
+
+      const ahora = Date.now();
+      const campanias = brutas.map(c => {
         const gs = (c.statistics && c.statistics.globalStats) || {};
-        const estado = ESTADO[c.status] || _txt(c.status);
+        let estado = ESTADO[c.status] || _txt(c.status);
+        // v1.0.2: sendNow la deja en cola con la hora actual → mientras tanto, 'enviando'.
+        if (c.status === 'queued') {
+          const t = new Date(c.scheduledAt).getTime();
+          if (Number.isFinite(t) && t <= ahora) { estado = 'enviando'; }
+        }
+        const f = porId[String(c.id)];
+        const datos = f ? {
+          plantillaId: _txt(f.plantillaId),
+          nombre: _txt(f.nombre),
+          asunto: _txt(f.asunto),
+          preheader: _txt(f.preheader),
+          valores: _parseJson(f.valores, {}),
+          listas: _parseJson(f.listas, [])
+        } : null;
         const listasIds = (c.recipients && Array.isArray(c.recipients.lists)) ? c.recipients.lists : [];
         const previstos = listasIds.reduce((t, id) => t + _num(porLista[String(id)]), 0);
         return {
@@ -643,7 +678,8 @@ export const listarCampanias = webMethod(
           aperturas: _num(gs.uniqueViews),
           clics: _num(gs.uniqueClicks),
           bajas: _num(gs.unsubscriptions),
-          rebotes: _num(gs.hardBounces) + _num(gs.softBounces)
+          rebotes: _num(gs.hardBounces) + _num(gs.softBounces),
+          datos
         };
       });
 
