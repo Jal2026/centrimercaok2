@@ -1,10 +1,12 @@
 /*
- * CENTRIMERCA — Comunicaciones · Page Code · v1.0.0
- * Página:  CENTRIX MARKETING Y COMUNICACIONES (donde vive el HtmlComponent).
+ * CENTRIMERCA — Comunicaciones · Page Code · v1.0.1
+ * Página:  CENTRIX Comunicaciones (pd272), donde vive el HtmlComponent.
  * Archivo: pega esto en el code panel de esa página.
  *
- * REQUIERE: backend/centriComunicaciones.web.js v1.0.0
- *           + Comunicaciones_Centrimerca_v1_0_0.html (en el HtmlComponent)
+ * REQUIERE: backend/centriComunicaciones.web.js v1.0.1
+ *           + Comunicaciones_Centrimerca_v1_0_1.html (en el HtmlComponent)
+ *
+ * v1.0.1: nuevo mensaje descartarBorrador → descartarBorradorCampania.
  *
  * QUÉ ES: un PUENTE PURO iframe ↔ backend. Cero decisiones, cero `if` sobre
  * contenido. Mismo patrón que el page code del Editor de actualidad: recibe un
@@ -15,9 +17,6 @@
  *                       → aquí llega por $w(EL).onMessage(event => event.data)
  * Canal Page → Widget : $w(EL).postMessage({type, payload})
  *
- * ⚠️ La página ya tiene código propio (colores del repetidor de tarjetas).
- *    Este bloque va DEBAJO, en el mismo archivo. Wix admite varios
- *    $w.onReady en la misma página.
  */
 
 import {
@@ -27,10 +26,11 @@ import {
   enviarCampania,
   listarCampanias,
   subirImagenCampania,
-  listarGaleria
+  listarGaleria,
+  descartarBorradorCampania
 } from 'backend/centriComunicaciones.web.js';
 
-const V  = 'Comunicaciones Page v1.0.0';
+const V  = 'Comunicaciones Page v1.0.1';
 const EL = '#htmlComunicacionesCentri';   // ← Element ID del HtmlComponent
 
 $w.onReady(function () {
@@ -79,6 +79,12 @@ $w.onReady(function () {
         case 'getCampanias': {
           const r = await listarCampanias();
           responder('campanias', r);
+          break;
+        }
+
+        case 'descartarBorrador': {
+          const r = await descartarBorradorCampania({ campaignId: msg.campaignId });
+          responder('borradorDescartado', r);
           break;
         }
 
