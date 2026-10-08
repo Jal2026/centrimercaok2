@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI · Backend
  * Archivo:  backend/centriLogic.web.js
- * VERSION:  1.0.4
- * FECHA:    03 Septiembre 2026
+ * VERSION:  1.0.5
+ * FECHA:    08 Octubre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
  * PROCEDENCIA
@@ -15,6 +15,8 @@
  * ───────────────────────────────────────────────────────────────────────────
  *
  * CENTRI v1.0 es SOLO CORPUS. No hay motor de datos.
+ * (v1.0.5: ya lo hay. Lee del CMS lo que se marque en el Entrenador, con una
+ *  herramienta. Ver la nota v1.0.5.)
  *
  * AKIRA dedica ~1.500 líneas a un motor de consulta transaccional: dos
  * herramientas, ejes ortogonales, registro declarativo de fuentes, parseo de
@@ -203,6 +205,35 @@
  *    no tienen plano. `centriAbrirChat` devuelve `modo: null` en ese caso, NO
  *    el plano por defecto. Forzar 'dudas' sobre una conversación de mercado
  *    sería peor que no tocar el chip. Con null, el front deja lo que haya.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * v1.0.5 — 08 OCT 2026 · DATOS Y ACCIONES DESDE EL ENTRENADOR
+ * ───────────────────────────────────────────────────────────────────────────
+ * Petición de Jal: CENTRI con acceso a los datos del CMS, CON SELECTOR, y que
+ * ofrezca acciones ("¿quieres llamar a Raquel?", "¿descargas su tarjeta?",
+ * "¿quieres conocer las variedades del kiwi?").
+ *
+ *   · SELECTOR: en el Entrenador, por plano. Se guarda en el alignment
+ *     (campo `fuentes`) y vale cuando se PUBLICA, como el tono o las reglas.
+ *     Qué colecciones, qué campos ve el modelo y qué campos son botón.
+ *   · CONSULTA: herramienta consultar_datos, generada desde la selección del
+ *     plano. Bucle de tool use como el de AKIRA (máx. 4 vueltas + cierre).
+ *     Un plano sin selección funciona exactamente igual que en v1.0.4: una
+ *     sola llamada y sin clave `tools`.
+ *   · ACCIONES: el modelo escribe [[ACCION:aN]] con ids que le da la
+ *     herramienta; este archivo los cambia por [[BTN:tipo|etiqueta|enlace]]
+ *     con el dato real del CMS. El modelo nunca escribe un teléfono ni un
+ *     enlace de botón. Preguntas sugeridas: [[PREGUNTA:texto]].
+ *   · BLOQUEO FIJO: conversaciones, administradores, miembros, pedidos y
+ *     formularios no se leen nunca, aunque se marquen a mano en el CMS.
+ *
+ * ⛔ REQUIERE el campo `fuentes` (Texto) en CentriAlignment y el Entrenador
+ *    v1.0.1. Sin campo, el alignment no trae `fuentes` y CENTRI responde
+ *    como en v1.0.4: degrada sin romper.
+ *
+ * Archivos del circuito: centriEntrenador.web.js v1.0.1 + widget del
+ * Entrenador v1.0.1 (selector) · este (consulta y botones) · centriConsole.js
+ * v1.0.2 (pinta los botones).
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -211,7 +242,7 @@ import { fetch } from 'wix-fetch';
 import wixData from 'wix-data';
 import { getSecret } from 'wix-secrets-backend';
 
-const VERSION = '1.0.4';
+const VERSION = '1.0.5';
 const TAG = `[CentriLogic][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -422,6 +453,443 @@ function _filtrarDocsPorPlano(docs, plano) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// v1.0.5 — DATOS Y ACCIONES (lo que se marca en el Entrenador)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// El alignment PUBLICADO de cada plano trae en `fuentes` qué colecciones del
+// CMS puede leer CENTRI en ese plano, qué campos ve de cada una y qué campos
+// se convierten en botón. Lo decide Centrimerca desde el Entrenador: este
+// archivo no conoce ninguna colección.
+//
+// CENTRI no recibe los datos de antemano: los pide con la herramienta
+// consultar_datos cuando la pregunta los necesita. Una colección nueva es
+// marcarla en el Entrenador y publicar. Cero código.
+
+// Colecciones que CENTRI no lee NUNCA, aunque alguien las marque a mano en el
+// CMS. ⚠️ MISMO LISTADO que centriEntrenador.web.js, que ni las enseña: si se
+// toca uno, se toca el otro. El chat es público y los clientes compiten entre
+// sí: conversaciones, administradores, miembros, pedidos y formularios no
+// salen por aquí.
+const COLECCIONES_BLOQUEADAS = [
+  'CentriSessions', 'CentriMessages', 'CentriLog', 'CentriAdmins',
+  'CentriAlignment', 'CentriDocuments', 'CentriPlantillas', 'CentriCampanias',
+  'CentriPronunciacion'
+];
+const PREFIJOS_BLOQUEADOS = ['Members/', 'WixForms/', 'Marketing/', 'Stores/Orders'];
+
+function _coleccionBloqueada(id) {
+  const s = String(id || '').trim();
+  if (!s) return true;
+  if (COLECCIONES_BLOQUEADAS.indexOf(s) >= 0) return true;
+  return PREFIJOS_BLOQUEADOS.some(p => s.indexOf(p) === 0);
+}
+
+const NOMBRE_HERRAMIENTA = 'consultar_datos';
+
+const MAX_VUELTAS        = 4;       // vueltas de herramienta por pregunta
+const LIMITE_FILAS_FUENTE = 1000;   // tope de lectura por colección
+// Tope de lo que devuelve una consulta. Por encima, sin búsqueda, se devuelve
+// solo el índice de nombres y se pide acotar: volcar una colección grande
+// entera quema contexto y tiempo sin mejorar la respuesta.
+const MAX_CHARS_RESULTADO = 40000;
+const MAX_BOTONES   = 6;
+const MAX_PREGUNTAS = 3;
+
+/*
+ * Acciones posibles. Lista CERRADA: es lo que la consola sabe pintar. Cada una
+ * construye su enlace con el valor del campo; si el valor no sirve (vacío,
+ * correo mal formado, protocolo raro), no hay botón.
+ */
+const TIPOS_ACCION = {
+  llamar: {
+    etiqueta: n => n ? `Llamar a ${n}` : 'Llamar',
+    // Un "+" inicial se respeta; si no lo hay, se marca el número tal cual.
+    // No se antepone ningún prefijo de país: el dato manda.
+    href: v => {
+      const s = _txt(v);
+      const d = s.replace(/[^\d]/g, '');
+      return d ? 'tel:' + (s.charAt(0) === '+' ? '+' : '') + d : '';
+    }
+  },
+  whatsapp: {
+    etiqueta: n => n ? `WhatsApp con ${n}` : 'WhatsApp',
+    // Mismo criterio que fichaProducto.js v1.3.0: solo dígitos.
+    href: v => {
+      const d = _txt(v).replace(/[^\d]/g, '');
+      return d ? 'https://wa.me/' + d : '';
+    }
+  },
+  correo: {
+    etiqueta: n => n ? `Escribir a ${n}` : 'Escribir',
+    href: v => {
+      const s = _txt(v);
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) ? 'mailto:' + s : '';
+    }
+  },
+  tarjeta: {
+    etiqueta: n => n ? `Tarjeta de ${n}` : 'Tarjeta de contacto',
+    href: v => _enlaceSeguro(v)
+  },
+  ficha: {
+    etiqueta: n => n ? `Ver ficha: ${n}` : 'Ver ficha',
+    href: v => _enlaceSeguro(v)
+  },
+  enlace: {
+    etiqueta: n => n ? `Abrir: ${n}` : 'Abrir enlace',
+    href: v => _enlaceSeguro(v)
+  }
+};
+
+/* Solo http(s) o ruta de la propia web ("/productos/kiwi"). Nada más. */
+function _enlaceSeguro(v) {
+  const s = _txt(v);
+  if (/^https?:\/\//i.test(s)) return s;
+  if (s.charAt(0) === '/' && s.charAt(1) !== '/') {
+    try { return decodeURI(s); } catch (_) { return s; }
+  }
+  return '';
+}
+
+/* Copia literal de centriCatalogo.web.js v1.0.3. */
+function _txt(v) {
+  return (v === null || v === undefined) ? '' : String(v).trim();
+}
+
+/*
+ * JSON guardado en un campo de TEXTO. Wix a veces lo devuelve como objeto y a
+ * veces como string escapado dos veces. Mismo criterio que _parseTemporada en
+ * centriCatalogo.web.js: hasta DOS JSON.parse, parando en cuanto hay objeto.
+ * Devuelve null si no es JSON.
+ */
+function _parseJson(raw) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  let val = raw;
+  for (let i = 0; i < 2 && typeof val === 'string'; i++) {
+    const s = val.trim();
+    if (!s) return null;
+    const c = s.charAt(0);
+    if (c !== '{' && c !== '[' && c !== '"') return null;
+    try { val = JSON.parse(s); } catch (_) { return null; }
+  }
+  return (val && typeof val === 'object') ? val : null;
+}
+
+/*
+ * La selección del plano, saneada. Lo que no cuadra (colección bloqueada, sin
+ * id, acción desconocida) se descarta aquí y no llega a la herramienta.
+ */
+function _leerFuentes(config) {
+  const vacio = { colecciones: [], preguntas: false, descartadas: [] };
+  if (!config || !config.fuentes) return vacio;
+
+  const f = _parseJson(config.fuentes);
+  if (!f) {
+    console.warn(`${TAG} ⚠️ alignment '${config.modo}' v${config.version || '?'}: \`fuentes\` no es JSON válido — sin datos`);
+    return vacio;
+  }
+
+  const descartadas = [];
+  const colecciones = [];
+  for (const c of (Array.isArray(f.colecciones) ? f.colecciones : [])) {
+    if (!c || !c.id) continue;
+    const id = String(c.id).trim();
+    if (_coleccionBloqueada(id)) { descartadas.push(id); continue; }
+
+    const campos = (Array.isArray(c.campos) ? c.campos : [])
+      .filter(x => x && x.key)
+      .map(x => ({ key: String(x.key), tipo: _txt(x.tipo).toUpperCase() }));
+
+    const acciones = (Array.isArray(c.acciones) ? c.acciones : [])
+      .filter(x => x && x.key && TIPOS_ACCION[x.accion])
+      .map(x => ({ key: String(x.key), accion: x.accion }));
+
+    const principal = _txt(c.principal);
+    if (!principal && campos.length === 0 && acciones.length === 0) continue;
+
+    colecciones.push({
+      id,
+      nombre: _txt(c.nombre) || id,
+      principal,
+      descripcion: _txt(c.descripcion),
+      campos,
+      acciones
+    });
+  }
+
+  if (descartadas.length > 0) {
+    console.warn(`${TAG} ⚠️ fuentes BLOQUEADAS descartadas: ${descartadas.join(', ')}`);
+  }
+  return { colecciones, preguntas: f.preguntas === true, descartadas };
+}
+
+/* Definición de la herramienta, generada desde la selección del plano. */
+function _herramientaDatos(fuentes) {
+  const unicos = (arr) => arr.filter((x, i) => x && arr.indexOf(x) === i);
+  const listado = fuentes.colecciones.map(c => {
+    const campos = unicos([c.principal].concat(c.campos.map(x => x.key)));
+    const acciones = unicos(c.acciones.map(a => a.accion));
+    return `· "${c.id}" (${c.nombre}): ${c.descripcion || 'sin descripción'}` +
+      (campos.length ? `\n  Campos: ${campos.join(', ')}` : '') +
+      (acciones.length ? `\n  Acciones: ${acciones.join(', ')}` : '');
+  }).join('\n');
+
+  return {
+    name: NOMBRE_HERRAMIENTA,
+    description:
+      'Lee datos reales de Centrimerca guardados en nuestra web. Úsala siempre que la respuesta ' +
+      'dependa de un dato concreto: no lo deduzcas ni lo des de memoria. Puedes llamarla varias ' +
+      'veces en la misma respuesta.\n\nFuentes disponibles en este plano:\n' + listado,
+    input_schema: {
+      type: 'object',
+      properties: {
+        fuente: {
+          type: 'string',
+          enum: fuentes.colecciones.map(c => c.id),
+          description: 'Qué colección leer.'
+        },
+        busqueda: {
+          type: 'string',
+          description: 'Texto para acotar: el nombre de un producto, una variedad, una persona o un cargo. ' +
+            'Opcional: sin él devuelve la colección entera, salvo que sea demasiado grande.'
+        }
+      },
+      required: ['fuente']
+    }
+  };
+}
+
+/* RICH_TEXT → texto. Solo para que el modelo no lea etiquetas. */
+function _sinHtml(v) {
+  return _txt(v)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/* Valor de un campo tal y como lo lee el modelo. undefined = no se envía. */
+function _valorParaModelo(v, tipo) {
+  if (v === null || v === undefined || v === '') return undefined;
+  if (tipo === 'RICH_TEXT') return _sinHtml(v) || undefined;
+  if (tipo === 'ARRAY_STRING' && Array.isArray(v)) {
+    return v.map(x => _txt(x)).filter(Boolean).join(', ') || undefined;
+  }
+  if (tipo === 'DATE' || tipo === 'DATETIME') {
+    const d = (v instanceof Date) ? v : new Date((v && v.$date) ? v.$date : v);
+    return isNaN(d.getTime()) ? (_txt(v) || undefined) : d.toISOString().substring(0, 10);
+  }
+  if (tipo === 'BOOLEAN') return v === true ? 'sí' : (v === false ? 'no' : undefined);
+  if (tipo === 'ADDRESS' && typeof v === 'object') return _txt(v.formatted) || undefined;
+  if (tipo === 'PAGE_LINK' || tipo === 'URL') return _enlaceSeguro(v) || _txt(v) || undefined;
+  if (typeof v === 'string') {
+    const json = _parseJson(v);           // p. ej. `temporada`
+    return json !== null ? json : (_txt(v) || undefined);
+  }
+  return v;
+}
+
+function _nuevoRegistroAcciones() {
+  return { n: 0, mapa: {} };
+}
+
+function _registrarAccion(reg, tipo, etiqueta, href) {
+  reg.n++;
+  const id = 'a' + reg.n;
+  reg.mapa[id] = { tipo, etiqueta, href };
+  return id;
+}
+
+/*
+ * La herramienta. Genérica: todo su comportamiento sale de la selección.
+ *
+ *   · Lee la colección y descarta las filas con `activo === false`, EN
+ *     MEMORIA: criterio literal de FichaProducto.page.js v1.1.4 (lo apagado a
+ *     propósito no existe para CENTRI; un campo vacío no apaga nada).
+ *   · Proyección: el campo principal (el que nombra la fila) + los campos
+ *     marcados. Lo no marcado NO viaja al modelo.
+ *   · Acciones: se calculan con el valor REAL del campo, aunque ese campo no
+ *     se le enseñe al modelo. El modelo solo recibe el id y el tipo.
+ *   · Búsqueda: copia del criterio de consultarConfig (AKIRA): sin acentos y,
+ *     si parece un teléfono, por dígitos. Sin coincidencias se devuelve todo.
+ */
+async function _consultarDatos(input, fuentes, reg) {
+  const p = input || {};
+  const def = fuentes.colecciones.find(c => c.id === p.fuente);
+  if (!def) {
+    return {
+      error: `La fuente "${p.fuente}" no está disponible en este plano.`,
+      fuentesDisponibles: fuentes.colecciones.map(c => c.id)
+    };
+  }
+  // Defensa en profundidad: _leerFuentes ya las descarta.
+  if (_coleccionBloqueada(def.id)) return { error: 'Fuente no disponible.' };
+
+  const t0 = Date.now();
+  const res = await wixData.query(def.id).limit(LIMITE_FILAS_FUENTE).find(AUTH);
+  const visibles = (res.items || []).filter(item => item && item.activo !== false);
+
+  let filas = visibles.map(item => {
+    const datos = {};
+    if (def.principal) {
+      const v = _valorParaModelo(item[def.principal], 'TEXT');
+      if (v !== undefined) datos[def.principal] = v;
+    }
+    for (const c of def.campos) {
+      if (c.key === def.principal) continue;
+      const v = _valorParaModelo(item[c.key], c.tipo);
+      if (v !== undefined) datos[c.key] = v;
+    }
+    return { item, datos };
+  });
+
+  if (p.busqueda) {
+    const norm = (s) => String(s || '').toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const aguja = norm(p.busqueda).trim();
+    const soloDigitos = aguja.replace(/[^\d]/g, '');
+    const esTelefono = soloDigitos.length >= 6;
+    const coinciden = filas.filter(f => {
+      const blob = norm(JSON.stringify(f.datos));
+      if (aguja && blob.indexOf(aguja) !== -1) return true;
+      if (esTelefono && blob.replace(/[^\d]/g, '').indexOf(soloDigitos) !== -1) return true;
+      return false;
+    });
+    if (coinciden.length > 0) filas = coinciden;
+  }
+
+  // Demasiado grande para devolverla entera: índice de nombres y que acote.
+  // Sin campo principal no hay índice posible: se recorta por filas enteras.
+  const tamano = JSON.stringify(filas.map(f => f.datos)).length;
+  let recortadas = 0;
+  if (tamano > MAX_CHARS_RESULTADO) {
+    if (def.principal) {
+      console.log(`${TAG} consultar_datos fuente=${def.id} busqueda="${p.busqueda || ''}" → ${filas.length} filas, ${tamano} chars: SOLO ÍNDICE (${Date.now() - t0}ms)`);
+      return {
+        fuente: def.id,
+        total: filas.length,
+        aviso: 'Hay demasiados datos para devolverlos todos. Vuelve a consultar con `busqueda` (por ejemplo, uno de estos nombres).',
+        indice: filas.map(f => f.datos[def.principal]).filter(Boolean)
+      };
+    }
+    let acumulado = 2;
+    const caben = [];
+    for (const f of filas) {
+      const n = JSON.stringify(f.datos).length + 1;
+      if (acumulado + n > MAX_CHARS_RESULTADO) break;
+      acumulado += n;
+      caben.push(f);
+    }
+    recortadas = filas.length - caben.length;
+    filas = caben;
+  }
+
+  const salida = filas.map(f => {
+    const fila = Object.assign({}, f.datos);
+    const nombre = _txt(def.principal ? f.item[def.principal] : '');
+    const acciones = [];
+    for (const a of def.acciones) {
+      const tipo = TIPOS_ACCION[a.accion];
+      const href = tipo.href(f.item[a.key]);
+      if (!href) continue;
+      acciones.push({ id: _registrarAccion(reg, a.accion, tipo.etiqueta(nombre), href), tipo: a.accion });
+    }
+    if (acciones.length > 0) fila.acciones = acciones;
+    return fila;
+  });
+
+  console.log(`${TAG} consultar_datos fuente=${def.id} busqueda="${p.busqueda || ''}" → ${salida.length} filas${recortadas ? ` (+${recortadas} recortadas)` : ''} (${Date.now() - t0}ms)`);
+  const resultado = { fuente: def.id, total: salida.length + recortadas, filas: salida };
+  if (recortadas > 0) {
+    resultado.aviso = `Faltan ${recortadas} filas por límite de espacio. Si la respuesta puede depender de ellas, consulta con \`busqueda\`.`;
+  }
+  return resultado;
+}
+
+/*
+ * Instrucciones de la herramienta y de los marcadores. Es MECÁNICA del
+ * sistema (cómo se pide un dato, cómo sale un botón), no criterio: el criterio
+ * de cuándo ofrecer qué va en el Entrenador.
+ */
+function _bloqueDatos(fuentes) {
+  const lineas = [
+    '--- DATOS Y ACCIONES ---',
+    `Tienes la herramienta ${NOMBRE_HERRAMIENTA} para leer datos de Centrimerca. Úsala siempre que la respuesta dependa de un dato concreto: un producto, una variedad, una persona o un contacto. No lo deduzcas ni lo respondas de memoria.`,
+    'Las filas pueden traer acciones (llamar, whatsapp, correo, tarjeta, ficha o enlace), cada una con su id. Para ofrecer una, escribe su marcador exactamente así: [[ACCION:id]], en una línea propia al final de la respuesta. El botón lo monta el sistema con el dato real: no hace falta que escribas el teléfono, el correo ni el enlace. Usa solo ids que te haya devuelto la herramienta en esta misma respuesta.',
+    'Ofrecer estos botones no es tramitar nada: solo abren el teléfono, el correo o una página.'
+  ];
+  if (fuentes.preguntas) {
+    lineas.push('Puedes cerrar con una o dos preguntas de seguimiento, escritas como las haría el usuario, con este marcador: [[PREGUNTA:texto]], cada una en una línea propia.');
+  }
+  return lineas.join('\n');
+}
+
+const RE_BTN      = /\[\[BTN:[^\]]*\]\]/g;
+const RE_ACCION   = /\[\[ACCION:\s*([a-zA-Z0-9_-]+)\s*\]\]/g;
+const RE_PREGUNTA = /\[\[PREGUNTA:\s*([^\]]+?)\s*\]\]/g;
+
+/*
+ * Respuesta del modelo → texto que se guarda y se envía a la consola.
+ *
+ *   · [[BTN:...]] que escriba el modelo se BORRAN: un botón solo lo fabrica
+ *     este archivo, con el dato del CMS. Si no, un modelo que imitase el
+ *     historial podría poner un teléfono inventado detrás de un botón.
+ *   · [[ACCION:aN]] → [[BTN:tipo|etiqueta|enlace]] si el id existe en esta
+ *     pregunta. Un id desconocido desaparece.
+ *   · [[PREGUNTA:...]] se conserva solo si el plano lo permite.
+ *
+ * El resultado se guarda tal cual en CentriMessages: así el botón sobrevive
+ * al 504 (el polling lee del historial) y a la reapertura de la conversación.
+ */
+function _resolverMarcadores(texto, reg, permitirPreguntas) {
+  let s = String(texto || '').replace(RE_BTN, '');
+  const usados = {};
+  let botones = 0;
+  s = s.replace(RE_ACCION, (m, id) => {
+    const a = reg && reg.mapa[id];
+    if (!a || usados[id] || botones >= MAX_BOTONES) return '';
+    usados[id] = true;
+    botones++;
+    const etiqueta = String(a.etiqueta).replace(/\|/g, '/').replace(/\]/g, ')');
+    const href = String(a.href).replace(/\|/g, '%7C').replace(/\]/g, '%5D');
+    return `[[BTN:${a.tipo}|${etiqueta}|${href}]]`;
+  });
+  let preguntas = 0;
+  s = s.replace(RE_PREGUNTA, (m, q) => {
+    if (!permitirPreguntas || preguntas >= MAX_PREGUNTAS) return '';
+    const t = _txt(q).replace(/\|/g, '/').substring(0, 160);
+    if (!t) return '';
+    preguntas++;
+    return `[[PREGUNTA:${t}]]`;
+  });
+  return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/*
+ * Historial → modelo. Los botones de turnos anteriores se convierten en su
+ * etiqueta y las preguntas sugeridas se quitan: el modelo no ve nunca un
+ * [[BTN:...]] que pudiera copiar.
+ */
+function _textoParaModelo(texto) {
+  return String(texto || '')
+    .replace(/\[\[BTN:[^|\]]*\|([^|\]]*)\|[^\]]*\]\]/g, '($1)')
+    .replace(RE_BTN, '')
+    .replace(RE_PREGUNTA, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function _contarBotones(texto) {
+  return (String(texto || '').match(RE_BTN) || []).length;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // FECHAS
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -458,7 +926,8 @@ function _hoyMadrid() {
  * fría y cuatro calientes.
  */
 function _buildSystemBlocks(ctx) {
-  const { config, documentos, empresa, plano } = ctx;
+  const { config, documentos, empresa, plano, fuentes } = ctx;
+  const hayDatos = !!(fuentes && fuentes.colecciones && fuentes.colecciones.length > 0);
   const hoy = _hoyMadrid();
   const stable = [];
 
@@ -545,6 +1014,9 @@ function _buildSystemBlocks(ctx) {
     '   conocimiento mandan sobre lo anterior donde sean más concretas.'
   ].join('\n'));
 
+  // ── v1.0.5 — DATOS Y ACCIONES (solo si el plano tiene selección) ──
+  if (hayDatos) stable.push(_bloqueDatos(fuentes));
+
   // ── GUARDRAILS EDITABLES DESDE EL CMS ──
   if (config) {
     const gr = [];
@@ -607,7 +1079,10 @@ function _buildSystemBlocks(ctx) {
     }
   } else {
     console.warn(`${TAG} ⚠️ plano '${plano}' SIN documentos activos`);
-    bloques.push('--- AVISO ---\nEn esta consulta no hay ningún documento cargado para este plano. Aplica la nota anterior sabiendo que no tienes material de referencia detrás.');
+    // v1.0.5 — si el plano tiene datos seleccionados, el aviso lo dice: leído
+    // a secas ("no tienes material"), el modelo no usaría la herramienta.
+    bloques.push('--- AVISO ---\nEn esta consulta no hay ningún documento cargado para este plano. Aplica la nota anterior sabiendo que no tienes material de referencia detrás.' +
+      (hayDatos ? ` Para datos concretos de Centrimerca sí tienes la herramienta ${NOMBRE_HERRAMIENTA}.` : ''));
   }
 
   stable.push(bloques.join('\n\n'));
@@ -651,12 +1126,21 @@ async function _postAnthropic(apiKey, body, timeoutMs, label) {
 }
 
 /**
- * Una sola llamada: en v1.0 no hay herramientas, así que no hay bucle de tool
- * use. El día que haya ERP, aquí entra el bucle y el resto no se toca.
+ * Sin herramientas (plano sin datos seleccionados): una sola llamada,
+ * exactamente como hasta v1.0.4.
  *
- * ⛔ La clave `tools` NO se añade al payload. Mandarla vacía es error de API.
+ * Con herramientas (v1.0.5): bucle de tool use, mismo esquema que AKIRA. El
+ * modelo pide datos → se ejecuta consultar_datos → el modelo responde. Máx.
+ * MAX_VUELTAS vueltas; si las agota, una llamada de cierre sin herramientas.
+ *
+ * ⛔ La clave `tools` NO se añade al payload si no hay herramienta. Mandarla
+ *    vacía es error de API.
  */
-async function _callModelo(model, apiKey, systemBlocks, messages, timeoutMs) {
+async function _callModelo(model, apiKey, systemBlocks, messages, timeoutMs, herramientas) {
+  if (herramientas) {
+    return _callModeloConHerramientas(model, apiKey, systemBlocks, messages, timeoutMs, herramientas);
+  }
+
   const startMs = Date.now();
 
   const payload = {
@@ -685,9 +1169,81 @@ async function _callModelo(model, apiKey, systemBlocks, messages, timeoutMs) {
   return { respuesta, timeMs: Date.now() - startMs, cacheStats };
 }
 
-async function _callConFallback(apiKey, systemBlocks, messages) {
+async function _callModeloConHerramientas(model, apiKey, systemBlocks, messages, timeoutMs, herramientas) {
+  const startMs = Date.now();
+  const convo = messages.slice();
+  let cacheStats = { hit: 0, create: 0, input: 0, output: 0 };
+  let consultas = 0;
+
+  const sumar = (u) => {
+    const x = u || {};
+    cacheStats = {
+      hit:    cacheStats.hit    + (x.cache_read_input_tokens     || 0),
+      create: cacheStats.create + (x.cache_creation_input_tokens || 0),
+      input:  cacheStats.input  + (x.input_tokens  || 0),
+      output: cacheStats.output + (x.output_tokens || 0)
+    };
+  };
+  const textoDe = (bloques) => (bloques || [])
+    .filter(b => b.type === 'text')
+    .map(b => b.text)
+    .join('\n')
+    .trim();
+
+  for (let vuelta = 0; vuelta < MAX_VUELTAS; vuelta++) {
+    const payload = {
+      model,
+      max_tokens: MAX_TOKENS,
+      system: systemBlocks,
+      messages: convo,
+      tools: [herramientas.tool]
+    };
+
+    const data = await _postAnthropic(apiKey, payload, timeoutMs, model);
+    sumar(data.usage);
+
+    const bloques = data.content || [];
+    const toolUses = bloques.filter(b => b.type === 'tool_use');
+
+    if (data.stop_reason !== 'tool_use' || toolUses.length === 0) {
+      return { respuesta: textoDe(bloques), timeMs: Date.now() - startMs, cacheStats, consultas };
+    }
+
+    convo.push({ role: 'assistant', content: bloques });
+
+    const resultados = [];
+    for (const tu of toolUses) {
+      consultas++;
+      let out;
+      try {
+        out = (tu.name === herramientas.tool.name)
+          ? await herramientas.ejecutar(tu.input || {})
+          : { error: `Herramienta desconocida: ${tu.name}` };
+      } catch (e) {
+        console.warn(`${TAG} herramienta ${tu.name} falló:`, e.message);
+        out = { error: 'No se pudieron leer los datos: ' + e.message };
+      }
+      resultados.push({
+        type: 'tool_result',
+        tool_use_id: tu.id,
+        content: JSON.stringify(out)
+      });
+    }
+    convo.push({ role: 'user', content: resultados });
+  }
+
+  // Salvaguarda: si agota las vueltas, pide el cierre sin más herramientas.
+  console.warn(`${TAG} ⚠️ ${MAX_VUELTAS} vueltas de herramienta agotadas: llamada de cierre`);
+  const final = await _postAnthropic(apiKey, {
+    model, max_tokens: MAX_TOKENS, system: systemBlocks, messages: convo
+  }, timeoutMs, model + '-cierre');
+  sumar(final.usage);
+  return { respuesta: textoDe(final.content), timeMs: Date.now() - startMs, cacheStats, consultas };
+}
+
+async function _callConFallback(apiKey, systemBlocks, messages, herramientas) {
   try {
-    const r = await _callModelo(MODEL_PRIMARY, apiKey, systemBlocks, messages, PRIMARY_TIMEOUT_MS);
+    const r = await _callModelo(MODEL_PRIMARY, apiKey, systemBlocks, messages, PRIMARY_TIMEOUT_MS, herramientas);
     return { ...r, modeloUsado: MODEL_PRIMARY, degradado: false };
   } catch (err1) {
     if (!FALLBACK_HABILITADO) {
@@ -696,7 +1252,7 @@ async function _callConFallback(apiKey, systemBlocks, messages) {
     // ⚠️ Degradación VISIBLE. La objeción de la guía es que sea silenciosa.
     console.warn(`${TAG} ⚠️ DEGRADACIÓN: ${MODEL_PRIMARY} falló (${err1.message}). Cayendo a ${MODEL_FALLBACK}.`);
     try {
-      const r = await _callModelo(MODEL_FALLBACK, apiKey, systemBlocks, messages, FALLBACK_TIMEOUT_MS);
+      const r = await _callModelo(MODEL_FALLBACK, apiKey, systemBlocks, messages, FALLBACK_TIMEOUT_MS, herramientas);
       return { ...r, modeloUsado: MODEL_FALLBACK, degradado: true };
     } catch (err2) {
       throw new Error(`${MODEL_PRIMARY}:[${err1.message}] ${MODEL_FALLBACK}:[${err2.message}]`);
@@ -837,7 +1393,8 @@ function _log(campos) {
     timeMs: Number(campos.totalMs) || 0,
     corpusChars: Number(campos.corpusChars) || 0,
     corpusTruncado: campos.corpusTruncado === true,
-    params: JSON.stringify({ cache: campos.cacheStats || {} }).substring(0, 1000),
+    // v1.0.5 — `datos` (fuentes, consultas, botones) va dentro: sin columnas nuevas.
+    params: JSON.stringify({ cache: campos.cacheStats || {}, datos: campos.datos || {} }).substring(0, 1000),
     responseSummary: (campos.respuesta || '').substring(0, 200),
     version: VERSION,
     error: campos.error || ''
@@ -915,6 +1472,13 @@ export async function askCentriCore({ sessionId, query, userId, userName, modo }
     const config = _alignmentDelPlano(alignments, plano);
     const documentosDelPlano = _filtrarDocsPorPlano(documentos, plano);
 
+    // v1.0.5 — datos y acciones del plano, tal y como están PUBLICADOS.
+    const fuentes = _leerFuentes(config);
+    const reg = _nuevoRegistroAcciones();
+    const herramientas = fuentes.colecciones.length > 0
+      ? { tool: _herramientaDatos(fuentes), ejecutar: (input) => _consultarDatos(input, fuentes, reg) }
+      : null;
+
     const prepMs = Date.now() - tIn;
     const corpusChars = documentosDelPlano.reduce(
       (n, d) => n + ((d && d.contenido) ? d.contenido.length : 0), 0);
@@ -925,7 +1489,7 @@ export async function askCentriCore({ sessionId, query, userId, userName, modo }
     // un `align=por defecto` significa que la fila no está publicada o le
     // falta el plano; un `docs=` que no cuadre significa que alguna celda de
     // plano quedó vacía y ese documento se fue al corpus por defecto.
-    console.log(`${TAG} PREP ${prepMs}ms: plano=${plano} align=${config ? 'v' + (config.version || '?') : 'por defecto'} docs=${documentos.length}→${documentosDelPlano.length} corpus=${corpusChars}/${tope}`);
+    console.log(`${TAG} PREP ${prepMs}ms: plano=${plano} align=${config ? 'v' + (config.version || '?') : 'por defecto'} docs=${documentos.length}→${documentosDelPlano.length} corpus=${corpusChars}/${tope} fuentes=${fuentes.colecciones.map(c => c.id).join(',') || '-'}`);
 
     if (corpusTruncado) {
       console.warn(`${TAG} ⚠️ el corpus del plano '${plano}' excede el presupuesto: se truncará en ${tope} chars`);
@@ -940,7 +1504,7 @@ export async function askCentriCore({ sessionId, query, userId, userName, modo }
     }
 
     const systemBlocks = _buildSystemBlocks({
-      config, documentos: documentosDelPlano, empresa, plano
+      config, documentos: documentosDelPlano, empresa, plano, fuentes
     });
 
     // ── SESIÓN E HISTORIAL ──
@@ -963,7 +1527,10 @@ export async function askCentriCore({ sessionId, query, userId, userName, modo }
         sessionPromise = _crearSesion(userId, userName, query, plano);
       } else {
         sessionPromise = Promise.resolve(sessionId);
-        messages = await _getHistorial(sessionId);
+        // v1.0.5 — los botones de turnos anteriores viajan como su etiqueta:
+        // el modelo no ve nunca un [[BTN:...]] que pudiera imitar.
+        messages = (await _getHistorial(sessionId)).map(m =>
+          m.role === 'assistant' ? { role: m.role, content: _textoParaModelo(m.content) } : m);
       }
     }
 
@@ -972,15 +1539,24 @@ export async function askCentriCore({ sessionId, query, userId, userName, modo }
     // ── MODELO ──
     let r;
     try {
-      r = await _callConFallback(apiKey, systemBlocks, messages);
+      r = await _callConFallback(apiKey, systemBlocks, messages, herramientas);
     } catch (err) {
       console.error(`${TAG} el modelo no respondió:`, err.message);
       try { await sessionPromise; } catch (_) {}
-      _log({ query, plano, error: err.message, totalMs: Date.now() - tIn, prepMs, corpusChars, corpusTruncado });
+      _log({ query, plano, error: err.message, totalMs: Date.now() - tIn, prepMs, corpusChars, corpusTruncado,
+             datos: { fuentes: fuentes.colecciones.map(c => c.id) } });
       return { ok: false, error: 'El servicio no responde ahora mismo. Reinténtalo en unos segundos.' };
     }
 
-    const { respuesta, modeloUsado, degradado, timeMs: apiMs, cacheStats } = r;
+    const { modeloUsado, degradado, timeMs: apiMs, cacheStats } = r;
+
+    // v1.0.5 — marcadores → botones con el dato real (o fuera, si no valen).
+    const respuesta = _resolverMarcadores(r.respuesta, reg, fuentes.preguntas);
+    const datos = {
+      fuentes: fuentes.colecciones.map(c => c.id),
+      consultas: r.consultas || 0,
+      botones: _contarBotones(respuesta)
+    };
 
     let effectiveSessionId;
     try {
@@ -997,9 +1573,9 @@ export async function askCentriCore({ sessionId, query, userId, userName, modo }
     await _guardarMensajes(effectiveSessionId, String(query), respuesta);
 
     const totalMs = Date.now() - tIn;
-    _log({ query, respuesta, plano, modeloUsado, degradado, prepMs, apiMs, totalMs, cacheStats, corpusChars, corpusTruncado });
+    _log({ query, respuesta, plano, modeloUsado, degradado, prepMs, apiMs, totalMs, cacheStats, corpusChars, corpusTruncado, datos });
 
-    console.log(`${TAG} askCentriCore OUT total=${totalMs}ms (prep=${prepMs}ms api=${apiMs}ms) modelo=${modeloUsado}${degradado ? ' ⚠️DEGRADADO' : ''} cache=${cacheStats.hit}/${cacheStats.create} len=${respuesta.length}`);
+    console.log(`${TAG} askCentriCore OUT total=${totalMs}ms (prep=${prepMs}ms api=${apiMs}ms) modelo=${modeloUsado}${degradado ? ' ⚠️DEGRADADO' : ''} cache=${cacheStats.hit}/${cacheStats.create} len=${respuesta.length} consultas=${datos.consultas} botones=${datos.botones}`);
 
     return { ok: true, respuesta, sessionId: effectiveSessionId };
 
@@ -1244,6 +1820,15 @@ export const centriBorrarChat = webMethod(
  *                          fue al corpus del plano por defecto (dudas).
  *   · corpus= sobre el tope → se está truncando (sale además un console.warn).
  *   · ⚠️DEGRADADO en la línea OUT → respondió el modelo de respaldo.
+ *
+ *   v1.0.5:
+ *   · PREP ... fuentes=<ids>  → colecciones que el plano tiene PUBLICADAS en
+ *     el Entrenador. fuentes=- → el plano no usa datos (una sola llamada).
+ *   · consultar_datos fuente=<id> busqueda="…" → <n> filas  → cada consulta.
+ *   · OUT ... consultas=<n> botones=<n>  → cuántas veces leyó datos y cuántos
+ *     botones salieron en la respuesta.
+ *   · "fuentes BLOQUEADAS descartadas" → alguien marcó a mano una colección
+ *     prohibida en el CMS; no se ha leído.
  *
  * Y el circuito del 504, en la consola del navegador:
  *
