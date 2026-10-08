@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI · Entrenador (backend)
  * Archivo:  backend/centriEntrenador.web.js
- * VERSION:  1.0.0
- * FECHA:    25 Agosto 2026
+ * VERSION:  1.0.1
+ * FECHA:    08 Octubre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
  * PROCEDENCIA
@@ -81,6 +81,26 @@
  *   7. META_PROMPT POR PLANO. El de AKIRA describe un salón de peluquería y
  *      pide un asistente de gestión interna. Aquí hay cuatro planos con
  *      naturalezas distintas y cada uno necesita su molde.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * v1.0.1 — 08 OCT 2026 · SECCIÓN «DATOS Y ACCIONES»
+ * ───────────────────────────────────────────────────────────────────────────
+ *   · cargarConfigEntrenador devuelve además `colecciones`: las colecciones
+ *     del site con sus campos, leídas del propio CMS (nada escrito a mano).
+ *     Lectura copiada de cmsFieldReader.web.js v1.6.0 (KAMISUITE):
+ *     wix-data.v2 · listDataCollections / getDataCollection con elevate.
+ *     Si falla, el Entrenador sigue funcionando: `colecciones: []` y el
+ *     motivo en `coleccionesError`.
+ *   · guardarAlignment guarda `fuentes` (JSON en texto): por plano, qué
+ *     colecciones lee CENTRI, qué campos ve y qué campos son botón. Se
+ *     publica con el resto del alignment (publicarAlignment no cambia: ya
+ *     publica la fila entera).
+ *   · Colecciones BLOQUEADAS (conversaciones, administradores, miembros,
+ *     pedidos, formularios, configuración interna de CENTRI): ni se listan
+ *     ni se guardan. ⚠️ MISMO LISTADO que centriLogic.web.js.
+ *
+ * ⛔ REQUIERE el campo `fuentes` (Texto) en CentriAlignment. Escribir a un
+ *    campo inexistente NO falla: wixData ignora la clave en silencio.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -89,8 +109,12 @@ import { fetch } from 'wix-fetch';
 import wixData from 'wix-data';
 import { getSecret } from 'wix-secrets-backend';
 import { currentMember } from 'wix-members-backend';
+// v1.0.1 — lectura de colecciones y campos, copia de cmsFieldReader.web.js
+// v1.6.0 (KAMISUITE).
+import { elevate } from 'wix-auth';
+import { collections } from 'wix-data.v2';
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const TAG = `[CentriEntrenador][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -112,6 +136,142 @@ function _normPlano(v) {
 function _planoPedido(v) {
   const p = _normPlano(v);
   return PLANOS_VALIDOS.indexOf(p) >= 0 ? p : PLANO_DEFECTO;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.0.1 — DATOS Y ACCIONES: catálogo de colecciones y saneado de `fuentes`
+// ═══════════════════════════════════════════════════════════════════════════
+
+const getDataCollectionElevated = elevate(collections.getDataCollection);
+const listDataCollectionsElevated = elevate(collections.listDataCollections);
+
+// ⚠️ MISMO LISTADO que centriLogic.web.js. Aquí ni se enseñan; allí, aunque
+// alguien las marque a mano en el CMS, no se leen.
+const COLECCIONES_BLOQUEADAS = [
+  'CentriSessions', 'CentriMessages', 'CentriLog', 'CentriAdmins',
+  'CentriAlignment', 'CentriDocuments', 'CentriPlantillas', 'CentriCampanias',
+  'CentriPronunciacion'
+];
+const PREFIJOS_BLOQUEADOS = ['Members/', 'WixForms/', 'Marketing/', 'Stores/Orders'];
+
+function _coleccionBloqueada(id) {
+  const s = String(id || '').trim();
+  if (!s) return true;
+  if (COLECCIONES_BLOQUEADAS.indexOf(s) >= 0) return true;
+  return PREFIJOS_BLOQUEADOS.some(p => s.indexOf(p) === 0);
+}
+
+// Tipos de campo que se pueden marcar. Fuera: imágenes, vídeo, referencias
+// (son ids sin sentido para el modelo) y objetos internos.
+const TIPOS_CAMPO = ['TEXT', 'NUMBER', 'BOOLEAN', 'DATE', 'DATETIME', 'TIME', 'URL',
+                     'EMAIL', 'RICH_TEXT', 'ARRAY_STRING', 'PAGE_LINK', 'DOCUMENT', 'ADDRESS'];
+
+// Campos que Wix duplica al importar CSV (createdDate1, owner7, publishDate…).
+// No son datos del negocio y llenan la lista de ruido.
+const RE_CAMPO_RUIDO = /^(createdDate|updatedDate|owner|publishDate|unpublishDate)\d*$/;
+
+const ACCIONES_VALIDAS = ['llamar', 'whatsapp', 'correo', 'tarjeta', 'ficha', 'enlace'];
+
+function _campoSeleccionable(f) {
+  if (!f.key || f.key.indexOf('_manualSort') === 0) return false;
+  if (TIPOS_CAMPO.indexOf(f.tipo) < 0) return false;
+  // Los de sistema fuera, salvo los enlaces de página dinámica (link-…),
+  // que Wix marca como de sistema y son justo la ficha de cada fila.
+  if (f.sistema && f.tipo !== 'PAGE_LINK') return false;
+  return !RE_CAMPO_RUIDO.test(f.key);
+}
+
+/*
+ * Colecciones del site con sus campos seleccionables. Lectura literal de
+ * cmsFieldReader.web.js v1.6.0: la forma de la respuesta varía, así que se
+ * aceptan sus variantes; y si la lista no trae los campos, se piden uno a uno.
+ */
+async function _catalogoColecciones() {
+  const response = await listDataCollectionsElevated();
+
+  let rawList = [];
+  if (response && Array.isArray(response.collections)) {
+    rawList = response.collections;
+  } else if (response && Array.isArray(response.dataCollections)) {
+    rawList = response.dataCollections;
+  } else if (Array.isArray(response)) {
+    rawList = response;
+  } else if (response && Array.isArray(response.items)) {
+    rawList = response.items;
+  }
+
+  const visibles = rawList.filter(c => !_coleccionBloqueada(c && (c.id || c._id || c.dataCollectionId)));
+
+  const salida = await Promise.all(visibles.map(async (c) => {
+    const id = c.id || c._id || c.dataCollectionId;
+    let col = c;
+    if (!Array.isArray(c.fields) || c.fields.length === 0) {
+      try {
+        const r = await getDataCollectionElevated(id);
+        col = (r && r.collection) ? r.collection : (r || c);
+      } catch (e) {
+        console.warn(`${TAG} getDataCollection(${id}) falló:`, e.message);
+      }
+    }
+    const campos = (Array.isArray(col.fields) ? col.fields : [])
+      .map(f => ({
+        key: f.key || f.fieldKey || f.id || '',
+        nombre: f.displayName || f.name || '',
+        tipo: String(f.type || '').toUpperCase(),
+        sistema: (f.systemField === true) || (f.system === true)
+      }))
+      .filter(_campoSeleccionable)
+      .map(f => ({ key: f.key, nombre: f.nombre || f.key, tipo: f.tipo }));
+
+    return {
+      id,
+      nombre: c.displayName || col.displayName || id,
+      principal: col.displayField || c.displayField || '',
+      tipo: c.collectionType || col.collectionType || '',
+      campos
+    };
+  }));
+
+  // Propias primero, luego las de apps de Wix; dentro, por nombre.
+  const rango = (t) => (String(t).toUpperCase() === 'NATIVE' ? 0 : 1);
+  return salida
+    .filter(c => c.id && c.campos.length > 0)
+    .sort((a, b) => (rango(a.tipo) - rango(b.tipo)) || String(a.nombre).localeCompare(String(b.nombre), 'es'));
+}
+
+/*
+ * Lo que manda el widget → lo que se guarda. Se queda solo lo que tiene
+ * sentido: colecciones no bloqueadas, campos con clave y acciones de la lista
+ * cerrada. Se guarda como TEXTO (JSON).
+ */
+function _fuentesParaGuardar(raw) {
+  let f = raw;
+  if (typeof f === 'string') {
+    try { f = JSON.parse(f); } catch (_) { f = null; }
+  }
+  if (!f || typeof f !== 'object') return '';
+
+  const colecciones = [];
+  for (const c of (Array.isArray(f.colecciones) ? f.colecciones : [])) {
+    if (!c || !c.id || _coleccionBloqueada(c.id)) continue;
+    const campos = (Array.isArray(c.campos) ? c.campos : [])
+      .filter(x => x && x.key)
+      .map(x => ({ key: String(x.key), tipo: String(x.tipo || '').toUpperCase() }));
+    const acciones = (Array.isArray(c.acciones) ? c.acciones : [])
+      .filter(x => x && x.key && ACCIONES_VALIDAS.indexOf(x.accion) >= 0)
+      .map(x => ({ key: String(x.key), accion: x.accion }));
+    colecciones.push({
+      id: String(c.id),
+      nombre: String(c.nombre || c.id),
+      principal: String(c.principal || ''),
+      descripcion: String(c.descripcion || '').substring(0, 500),
+      campos,
+      acciones
+    });
+  }
+
+  if (colecciones.length === 0 && f.preguntas !== true) return '';
+  return JSON.stringify({ colecciones, preguntas: f.preguntas === true });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -265,10 +425,18 @@ export const cargarConfigEntrenador = webMethod(
       // ⚠️ El filtro por plano se hace EN MEMORIA, no en la query. Un
       // .eq('modo', plano) deja fuera las filas con el campo vacío, que por la
       // regla "vacío = plano por defecto" son precisamente las de ese plano.
-      const [borradorRes, publicadasRes, docsRes] = await Promise.all([
+      // v1.0.1 — el catálogo de colecciones va en paralelo y su fallo NO tumba
+      // la carga: sin él, el resto del Entrenador funciona igual.
+      let coleccionesError = '';
+      const [borradorRes, publicadasRes, docsRes, colecciones] = await Promise.all([
         wixData.query(C_ALIGNMENT).eq('status', 'borrador').limit(50).find(AUTH),
         wixData.query(C_ALIGNMENT).eq('status', 'publicado').descending('publicationDate').limit(50).find(AUTH),
-        wixData.query(C_DOCUMENTS).ascending('orden').limit(300).find(AUTH)
+        wixData.query(C_DOCUMENTS).ascending('orden').limit(300).find(AUTH),
+        _catalogoColecciones().catch(e => {
+          console.error(`${TAG} catálogo de colecciones falló:`, e.message);
+          coleccionesError = e.message || 'No se pudieron leer las colecciones.';
+          return [];
+        })
       ]);
 
       const borrador  = (borradorRes.items || []).find(a => _normPlano(a.modo) === plano) || null;
@@ -309,7 +477,9 @@ export const cargarConfigEntrenador = webMethod(
         publicada,
         documentos,
         consumo,
-        documentosActivos: documentos.filter(d => d.activo).length
+        documentosActivos: documentos.filter(d => d.activo).length,
+        colecciones,
+        coleccionesError
       };
 
     } catch (e) {
@@ -359,6 +529,8 @@ export const guardarAlignment = webMethod(
         welcomeTitle: config.welcomeTitle || '',
         welcomeText:  config.welcomeText  || '',
         placeholder:  config.placeholder  || '',
+        // v1.0.1 — datos y acciones del plano (JSON en texto).
+        fuentes: _fuentesParaGuardar(config.fuentes),
         version: config.version || '1.0',
         status: 'borrador'
       };
