@@ -2,8 +2,8 @@
  * CENTRIMERCA — CENTRI Console (Wix Custom Element)
  * Archivo:  public/custom-elements/centriConsole.js
  * Tag name: centri-console
- * VERSION:  1.0.1
- * FECHA:    25 Agosto 2026
+ * VERSION:  1.0.2
+ * FECHA:    08 Octubre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
  * PROCEDENCIA
@@ -106,6 +106,24 @@
  *    inexistente NO falla: wixData ignora la clave en silencio.
  *
  * ───────────────────────────────────────────────────────────────────────────
+ * v1.0.2 — 08 OCT 2026 · BOTONES DE ACCIÓN Y PREGUNTAS SUGERIDAS
+ * ───────────────────────────────────────────────────────────────────────────
+ * centriLogic v1.0.5 devuelve, dentro del texto de la respuesta:
+ *   [[BTN:tipo|etiqueta|enlace]]  → botón (llamar, correo, tarjeta, ficha…)
+ *   [[PREGUNTA:texto]]            → pregunta sugerida
+ * Aquí se sacan del texto y se pintan debajo de la respuesta. Van dentro del
+ * texto a propósito: así llegan igual por la respuesta directa, por el
+ * polling del 504 y al reabrir una conversación del historial.
+ *
+ *   · Botón = <a href> NATIVO, sin JavaScript (patrón fichaProducto.js:
+ *     a prueba de móvil). tel: y mailto: abren el teléfono o el correo; las
+ *     páginas se abren en pestaña nueva para no perder la conversación.
+ *   · Solo se aceptan tel:, mailto:, http(s) y rutas de la propia web. Lo
+ *     demás no se pinta.
+ *   · Pregunta sugerida: al pulsarla se envía como si la escribiera el usuario.
+ *   · La voz lee el texto SIN marcadores.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
  * COMUNICACIÓN
  * ───────────────────────────────────────────────────────────────────────────
  *   Page → CE:  el.setAttribute('response', JSON.stringify({...}))
@@ -130,7 +148,7 @@
     return;
   }
 
-  const VERSION = '1.0.1';
+  const VERSION = '1.0.2';
   const TAG = `[CENTRI v${VERSION}]`;
 
   const LS_SIDEBAR = 'centri-sidebar-open';
@@ -875,15 +893,67 @@
       const el = document.createElement('div');
       el.className = 'turn turn-ai';
       el.dataset.messageId = messageId;
-      el.innerHTML = this._formatEditorial(text) + this._renderTtsButton(messageId);
+      // v1.0.2 — los marcadores salen del texto y se pintan como botones.
+      const partes = this._extraerAcciones(text);
+      el.innerHTML = this._formatEditorial(partes.texto) + this._renderAcciones(partes) + this._renderTtsButton(messageId);
       this.shadowRoot.getElementById('messages').appendChild(el);
 
+      // Pregunta sugerida → se envía como si la escribiera el usuario.
+      el.querySelectorAll('.acc-preg').forEach(b => {
+        b.addEventListener('click', () => this._sendQuery(b.dataset.q || ''));
+      });
+
+      // La voz lee el texto sin marcadores.
       const ttsBtn = el.querySelector('.tts-btn');
-      if (ttsBtn) ttsBtn.addEventListener('click', () => this._onTtsButtonClick(messageId, text, ttsBtn));
+      if (ttsBtn) ttsBtn.addEventListener('click', () => this._onTtsButtonClick(messageId, partes.texto, ttsBtn));
       if (scroll) this._scrollBottom();
       if (scroll && this._ttsAutoPlay && ttsBtn) {
-        setTimeout(() => this._onTtsButtonClick(messageId, text, ttsBtn), 200);
+        setTimeout(() => this._onTtsButtonClick(messageId, partes.texto, ttsBtn), 200);
       }
+    }
+
+    /**
+     * v1.0.2 — Saca del texto [[BTN:tipo|etiqueta|enlace]] y
+     * [[PREGUNTA:texto]]. Cualquier otro marcador suelto se quita sin pintar.
+     */
+    _extraerAcciones(text) {
+      const botones = [];
+      const preguntas = [];
+      let limpio = String(text || '');
+      limpio = limpio.replace(/\[\[BTN:([a-z]+)\|([^|\]]*)\|([^\]]*)\]\]/g, (m, tipo, etiqueta, href) => {
+        botones.push({ tipo, etiqueta, href });
+        return '';
+      });
+      limpio = limpio.replace(/\[\[PREGUNTA:([^\]]+)\]\]/g, (m, q) => {
+        const t = q.trim();
+        if (t) preguntas.push(t);
+        return '';
+      });
+      limpio = limpio.replace(/\[\[(ACCION|BTN|PREGUNTA):[^\]]*\]\]/g, '');
+      limpio = limpio.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+      return { texto: limpio, botones, preguntas };
+    }
+
+    /**
+     * v1.0.2 — Botones como <a href> nativos (sin JS). Solo tel:, mailto:,
+     * http(s) y rutas de la propia web; lo demás no se pinta.
+     */
+    _renderAcciones(partes) {
+      const valido = (h) => /^(tel:|mailto:|https?:\/\/|\/(?!\/))/i.test(String(h || ''));
+      const botones = (partes.botones || []).filter(b => valido(b.href)).map(b => {
+        const pagina = /^(https?:|\/)/i.test(b.href);
+        return `<a class="acc-btn acc-${this._escape(b.tipo)}" href="${this._escape(b.href)}"` +
+               (pagina ? ' target="_blank" rel="noopener"' : '') +
+               `>${this._escape(b.etiqueta)}</a>`;
+      }).join('');
+      const preguntas = (partes.preguntas || []).map(q =>
+        `<button type="button" class="acc-preg" data-q="${this._escape(q)}">${this._escape(q)}</button>`
+      ).join('');
+      if (!botones && !preguntas) return '';
+      return `<div class="acciones">` +
+             (botones ? `<div class="acc-btns">${botones}</div>` : '') +
+             (preguntas ? `<div class="acc-pregs">${preguntas}</div>` : '') +
+             `</div>`;
     }
 
     _renderTtsButton(messageId) {
@@ -1691,6 +1761,27 @@
   .turn-ai .editorial p { margin: 0 0 14px 0; }
   .turn-ai .editorial p:last-child { margin-bottom: 0; }
   .turn-ai .editorial strong { font-weight: 600; color: var(--ink); }
+
+  /* v1.0.2 — botones de acción y preguntas sugeridas */
+  .acciones { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; max-width: 78ch; }
+  .acc-btns, .acc-pregs { display: flex; flex-wrap: wrap; gap: 8px; }
+  .acc-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--accent); color: var(--accent-ink);
+    border: 1px solid var(--accent); border-radius: 999px;
+    padding: 8px 14px; font-size: 14px; font-weight: 500;
+    text-decoration: none; font-family: var(--font-body);
+    transition: opacity .15s;
+  }
+  .acc-btn:hover { opacity: .88; }
+  .acc-preg {
+    background: transparent; color: var(--accent);
+    border: 1px solid var(--accent); border-radius: 999px;
+    padding: 7px 13px; font-size: 13.5px; cursor: pointer;
+    font-family: var(--font-body); text-align: left;
+    transition: background .15s;
+  }
+  .acc-preg:hover { background: var(--accent-soft); }
 
   .tts-row { margin-top: 10px; }
   .tts-btn {
