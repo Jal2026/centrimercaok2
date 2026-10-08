@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI · Backend
  * Archivo:  backend/centriLogic.web.js
- * VERSION:  1.0.5
+ * VERSION:  1.0.6
  * FECHA:    08 Octubre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
@@ -234,6 +234,19 @@
  * Archivos del circuito: centriEntrenador.web.js v1.0.1 + widget del
  * Entrenador v1.0.1 (selector) · este (consulta y botones) · centriConsole.js
  * v1.0.2 (pinta los botones).
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * v1.0.6 — 08 OCT 2026 · RESPUESTAS RÁPIDAS, NO "PREGUNTAS DE SEGUIMIENTO"
+ * ───────────────────────────────────────────────────────────────────────────
+ * Detectado por Jal en la primera prueba: los chips ofrecían información que
+ * CENTRI no tiene ("¿Qué formatos o calibres necesito?" sobre la banana, sin
+ * variedades en el CMS). La causa era el literal de este archivo: invitaba a
+ * "cerrar con preguntas de seguimiento". Ahora el marcador se describe como lo
+ * que es —una respuesta rápida que se envía como mensaje del usuario— y se
+ * prohíbe usarlo para ofrecer lo que no hay. CUÁNDO se usa (p. ej. «Sí» / «No»
+ * al ofrecer un comercial) es criterio y está en el Entrenador.
+ *
+ *   · MAX_PREGUNTAS 3 → 6: una respuesta rápida por cada comercial del equipo.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -242,7 +255,7 @@ import { fetch } from 'wix-fetch';
 import wixData from 'wix-data';
 import { getSecret } from 'wix-secrets-backend';
 
-const VERSION = '1.0.5';
+const VERSION = '1.0.6';
 const TAG = `[CentriLogic][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -493,7 +506,7 @@ const LIMITE_FILAS_FUENTE = 1000;   // tope de lectura por colección
 // entera quema contexto y tiempo sin mejorar la respuesta.
 const MAX_CHARS_RESULTADO = 40000;
 const MAX_BOTONES   = 6;
-const MAX_PREGUNTAS = 3;
+const MAX_PREGUNTAS = 6;
 
 /*
  * Acciones posibles. Lista CERRADA: es lo que la consola sabe pintar. Cada una
@@ -825,7 +838,7 @@ function _bloqueDatos(fuentes) {
     'Ofrecer estos botones no es tramitar nada: solo abren el teléfono, el correo o una página.'
   ];
   if (fuentes.preguntas) {
-    lineas.push('Puedes cerrar con una o dos preguntas de seguimiento, escritas como las haría el usuario, con este marcador: [[PREGUNTA:texto]], cada una en una línea propia.');
+    lineas.push('Respuestas rápidas: puedes añadir [[PREGUNTA:texto]], cada una en una línea propia al final. Al pulsarla, ese texto se envía tal cual, como si lo escribiera el usuario. Úsalas solo para que conteste a algo que tú le preguntas (por ejemplo «Sí» y «No») o para pedir algo que puedes responder con los datos que tienes. Nunca ofrezcas con ellas información que no tienes.');
   }
   return lineas.join('\n');
 }
