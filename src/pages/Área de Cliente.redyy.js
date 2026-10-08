@@ -1,9 +1,9 @@
 /*
- * CENTRIMERCA — Hall Área de Clientes · Page Code · v1.0.2
+ * CENTRIMERCA — Hall Área de Clientes · Page Code · v1.0.3
  * Página:  la del hall donde vive el HtmlComponent.
  * Archivo: pega esto en el code panel de esa página.
  *
- * REQUIERE: Hall_Area_de_Clientes_Centrimerca_v1_0_1.html en un HtmlComponent.
+ * REQUIERE: Hall_Area_de_Clientes_Centrimerca_v1_0_2.html en un HtmlComponent.
  *
  * QUÉ HACE: puente puro. El iframe avisa del botón pulsado con
  *   parent.postMessage({ type: 'hallNavegar', boton })
@@ -15,6 +15,7 @@
  *   tutorial   → btnTutorial  (Texto: URL o ruta)
  *   ayuda      → btnAyuda     (Texto: URL o ruta)
  *   terminos   → btnTerminos  (Texto: URL o ruta)
+ *   centri     → accesoCentri (Texto: URL o ruta)   ← v1.0.3
  *
  * ⚠️ CONFIRMA EL ELEMENT ID:
  *     EL — Element ID del HtmlComponent (por defecto '#htmlHallClientes').
@@ -31,12 +32,15 @@
  *   wixLocation.baseUrl ('/tutorialareaclientes' → 'https://www.centrimerca.es/tutorialareaclientes').
  *   Así todos los botones navegan por el mismo camino que el enlace externo,
  *   que es el que está comprobado que funciona.
+ *
+ * v1.0.3 — botón «Hablar con CENTRI» del hall v1.0.2: 'centri' → accesoCentri.
+ *   Mismo circuito que los otros cuatro; solo cambia la tabla CAMPOS.
  */
 
 import wixData from 'wix-data';
 import wixLocation from 'wix-location';
 
-const V          = 'Hall Clientes Page v1.0.2';
+const V          = 'Hall Clientes Page v1.0.3';
 const EL         = '#htmlHallClientes';   // ← Element ID del HtmlComponent
 const COL_CONFIG = 'CentriConfig';
 
@@ -44,7 +48,8 @@ const CAMPOS = {
   acceder:  'btnAcceder',
   tutorial: 'btnTutorial',
   ayuda:    'btnAyuda',
-  terminos: 'btnTerminos'
+  terminos: 'btnTerminos',
+  centri:   'accesoCentri'
 };
 
 $w.onReady(function () {
