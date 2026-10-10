@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI · Backend
  * Archivo:  backend/centriLogic.web.js
- * VERSION:  1.0.7
- * FECHA:    09 Octubre 2026
+ * VERSION:  1.0.8
+ * FECHA:    10 Octubre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
  * PROCEDENCIA
@@ -282,6 +282,34 @@
  *
  * ⛔ REQUIERE la consola v1.0.3, el page code de CENTRI v1.0.2 y el
  *    Entrenador v1.0.2 (backend + widget).
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * v1.0.8 — 10 OCT 2026 · UNA SOLA CONVERSACIÓN · HISTORIAL RECIENTE · BOTONES
+ * ───────────────────────────────────────────────────────────────────────────
+ * 1. UNA CONVERSACIÓN AUNQUE SE CAMBIE DE PESTAÑA. Decisión de Jal: derivar
+ *    a la otra pestaña partía la conversación en trozos en el historial. La
+ *    consola v1.0.4 ya no abre chat nuevo al cambiar de pestaña; aquí la
+ *    sesión guarda la ÚLTIMA pestaña usada (`modo`), que es la que se
+ *    restituye al reabrirla. Cada pregunta se responde con la pestaña que
+ *    llega en la petición, y el historial va entero al modelo: con dos
+ *    pestañas y derivación explícita, la continuidad vale más que la
+ *    separación que defendía la nota v1.0.4.
+ *    ⚠️ La sesión se actualiza ANTES de guardar los mensajes: el polling del
+ *    504 repinta en cuanto ve la respuesta, y si la sesión aún dijera la
+ *    pestaña anterior, la consola volvería a ella.
+ * 2. HISTORIAL RECIENTE. _getHistorial leía los PRIMEROS HISTORY_LIMIT*2
+ *    mensajes (ascending + limit): a partir de 10 turnos el modelo dejaba de
+ *    ver los últimos —un «Sí» llegaba sin la pregunta a la que contesta—.
+ *    Heredado tal cual de AKIRA y CATHOVIA. Ahora son los ÚLTIMOS, en orden.
+ * 3. TEXTO PROPIO DE CADA BOTÓN. Una acción puede traer `etiqueta` desde el
+ *    Entrenador v1.0.3 («Hazte cliente», «Tutorial del Área de Clientes»…).
+ *    Sin ella, la de siempre («Llamar a …»). Hace falta para colecciones de
+ *    una sola fila con varios enlaces, como CentriConfig: si no, todos los
+ *    botones se llamarían «Abrir: CENTRI PRO». La herramienta pasa la
+ *    etiqueta al modelo para que sepa cuál es cuál.
+ * 4. TELÉFONOS. Llamar y WhatsApp usan el criterio de Equipo.rcgzm.js (page
+ *    code de Equipo, Jal 08/10): solo dígitos, «0034…» → «34…», nueve
+ *    dígitos → «34» delante. wa.me no funciona sin prefijo de país.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -290,7 +318,7 @@ import { fetch } from 'wix-fetch';
 import wixData from 'wix-data';
 import { getSecret } from 'wix-secrets-backend';
 
-const VERSION = '1.0.7';
+const VERSION = '1.0.8';
 const TAG = `[CentriLogic][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -567,20 +595,18 @@ const MAX_PREGUNTAS = 6;
 const TIPOS_ACCION = {
   llamar: {
     etiqueta: n => n ? `Llamar a ${n}` : 'Llamar',
-    // Un "+" inicial se respeta; si no lo hay, se marca el número tal cual.
-    // No se antepone ningún prefijo de país: el dato manda.
+    // v1.0.8 — prefijo internacional con el criterio de Equipo.rcgzm.js.
     href: v => {
-      const s = _txt(v);
-      const d = s.replace(/[^\d]/g, '');
-      return d ? 'tel:' + (s.charAt(0) === '+' ? '+' : '') + d : '';
+      const t = _telefonoInternacional(v);
+      return t ? 'tel:+' + t : '';
     }
   },
   whatsapp: {
     etiqueta: n => n ? `WhatsApp con ${n}` : 'WhatsApp',
-    // Mismo criterio que fichaProducto.js v1.3.0: solo dígitos.
+    // v1.0.8 — wa.me exige el prefijo de país: mismo criterio que Llamar.
     href: v => {
-      const d = _txt(v).replace(/[^\d]/g, '');
-      return d ? 'https://wa.me/' + d : '';
+      const t = _telefonoInternacional(v);
+      return t ? 'https://wa.me/' + t : '';
     }
   },
   correo: {
@@ -603,6 +629,24 @@ const TIPOS_ACCION = {
     href: v => _enlaceSeguro(v)
   }
 };
+
+/*
+ * v1.0.8 — Teléfono con prefijo de país, sin «+». Copia del criterio de
+ * Equipo.rcgzm.js (page code de la página Equipo, Jal 08/10/2026):
+ *   solo dígitos · «0034…» → «34…» · nueve dígitos → «34» + número.
+ * Lo demás se deja tal cual: el dato manda.
+ */
+function _telefonoInternacional(v) {
+  let telefono = _txt(v).replace(/\D/g, '');
+  if (!telefono) return '';
+  if (telefono.startsWith('0034')) {
+    telefono = telefono.substring(2);
+  }
+  if (telefono.length === 9) {
+    telefono = '34' + telefono;
+  }
+  return telefono;
+}
 
 /* Solo http(s) o ruta de la propia web ("/productos/kiwi"). Nada más. */
 function _enlaceSeguro(v) {
@@ -663,9 +707,10 @@ function _leerFuentes(config) {
       .filter(x => x && x.key)
       .map(x => ({ key: String(x.key), tipo: _txt(x.tipo).toUpperCase() }));
 
+    // v1.0.8 — `etiqueta`: texto propio del botón (opcional).
     const acciones = (Array.isArray(c.acciones) ? c.acciones : [])
       .filter(x => x && x.key && TIPOS_ACCION[x.accion])
-      .map(x => ({ key: String(x.key), accion: x.accion }));
+      .map(x => ({ key: String(x.key), accion: x.accion, etiqueta: _txt(x.etiqueta).substring(0, 60) }));
 
     const principal = _txt(c.principal);
     if (!principal && campos.length === 0 && acciones.length === 0) continue;
@@ -862,7 +907,11 @@ async function _consultarDatos(input, fuentes, reg) {
       const tipo = TIPOS_ACCION[a.accion];
       const href = tipo.href(f.item[a.key]);
       if (!href) continue;
-      acciones.push({ id: _registrarAccion(reg, a.accion, tipo.etiqueta(nombre), href), tipo: a.accion });
+      // v1.0.8 — con texto propio, el modelo lo recibe para saber cuál es cuál.
+      const etiqueta = a.etiqueta || tipo.etiqueta(nombre);
+      const accion = { id: _registrarAccion(reg, a.accion, etiqueta, href), tipo: a.accion };
+      if (a.etiqueta) accion.etiqueta = a.etiqueta;
+      acciones.push(accion);
     }
     if (acciones.length > 0) fila.acciones = acciones;
     return fila;
@@ -1429,13 +1478,22 @@ async function _verificarPropiedad(sessionId, userId) {
   return { existe: true, propia: true, sesion };
 }
 
+/*
+ * v1.0.8 — Los ÚLTIMOS HISTORY_LIMIT*2 mensajes, en orden. Antes se pedían
+ * con ascending + limit, que devuelve los PRIMEROS: en una conversación de
+ * más de 10 turnos el modelo no veía los últimos (ver cabecera v1.0.8).
+ * Si la ventana empieza por una respuesta, se quita: el historial abre
+ * siempre con una pregunta.
+ */
 async function _getHistorial(sessionId) {
   const res = await wixData.query(C_MESSAGES)
     .eq('sessionRef', sessionId)
-    .ascending('orden')
+    .descending('orden')
     .limit(HISTORY_LIMIT * 2)
     .find(AUTH);
-  return (res.items || []).map(m => ({
+  const items = (res.items || []).slice().reverse();
+  while (items.length > 0 && items[0].rol !== 'user') items.shift();
+  return items.map(m => ({
     role: m.rol === 'user' ? 'user' : 'assistant',
     content: m.contenido
   }));
@@ -1452,7 +1510,7 @@ async function _getHistorial(sessionId) {
  * traga un catch, se desincroniza, y un filtro por él deja la barra lateral
  * vacía. Contar lo real es una query más y es la verdad.
  */
-async function _guardarMensajes(sessionId, query, respuesta) {
+async function _guardarMensajes(sessionId, query, respuesta, plano) {
   const res = await wixData.query(C_MESSAGES)
     .eq('sessionRef', sessionId)
     .descending('orden')
@@ -1462,23 +1520,28 @@ async function _guardarMensajes(sessionId, query, respuesta) {
   const orden = res.items.length > 0 ? (Number(res.items[0].orden) || 0) + 1 : 1;
   const now = new Date();
 
+  // v1.0.8 — la sesión, ANTES que los mensajes, y con la pestaña de esta
+  // pregunta: es la que se restituye al reabrir. Si fuera después, el
+  // polling del 504 podría ver la respuesta con la sesión aún en la pestaña
+  // anterior y devolver a ella la consola.
+  try {
+    const sesion = await wixData.get(C_SESSIONS, sessionId, AUTH);
+    if (sesion) {
+      const merged = { ...sesion };
+      merged.fechaActualizacion = now;
+      if (plano) merged.modo = plano;
+      await wixData.update(C_SESSIONS, merged, AUTH);
+    }
+  } catch (e) {
+    console.warn(`${TAG} _guardarMensajes: no se pudo tocar la sesión:`, e.message);
+  }
+
   await wixData.insert(C_MESSAGES, {
     sessionRef: sessionId, rol: 'user', contenido: query, orden, timestamp: now
   }, AUTH);
   await wixData.insert(C_MESSAGES, {
     sessionRef: sessionId, rol: 'assistant', contenido: respuesta, orden: orden + 1, timestamp: now
   }, AUTH);
-
-  try {
-    const sesion = await wixData.get(C_SESSIONS, sessionId, AUTH);
-    if (sesion) {
-      const merged = { ...sesion };
-      merged.fechaActualizacion = now;
-      await wixData.update(C_SESSIONS, merged, AUTH);
-    }
-  } catch (e) {
-    console.warn(`${TAG} _guardarMensajes: no se pudo tocar la sesión:`, e.message);
-  }
 }
 
 /**
@@ -1683,7 +1746,7 @@ export async function askCentriCore({ sessionId, query, userId, userName, modo }
       return { ok: false, error: 'No he podido generar respuesta. Reformula la pregunta.' };
     }
 
-    await _guardarMensajes(effectiveSessionId, String(query), respuesta);
+    await _guardarMensajes(effectiveSessionId, String(query), respuesta, plano);   // v1.0.8
 
     const totalMs = Date.now() - tIn;
     _log({ query, respuesta, plano, modeloUsado, degradado, prepMs, apiMs, totalMs, cacheStats, corpusChars, corpusTruncado, datos });
@@ -1955,6 +2018,11 @@ export const centriBorrarChat = webMethod(
  *     Enciclopedia (plano por defecto).
  *   · OUT ... derivada=centri|mercado → la respuesta ofreció el botón para
  *     hacer la pregunta en la otra pestaña. derivada=- → no lo ofreció.
+ *
+ *   v1.0.8:
+ *   · Una misma sessionId puede salir con plano=centri y plano=mercado en
+ *     preguntas sucesivas: es la conversación única. Al reabrirla, la
+ *     consola vuelve a la pestaña de la última pregunta.
  *
  * Y el circuito del 504, en la consola del navegador:
  *
