@@ -2,8 +2,8 @@
  * CENTRIMERCA — CENTRI Console (Wix Custom Element)
  * Archivo:  public/custom-elements/centriConsole.js
  * Tag name: centri-console
- * VERSION:  1.0.2
- * FECHA:    08 Octubre 2026
+ * VERSION:  1.0.3
+ * FECHA:    09 Octubre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
  * PROCEDENCIA
@@ -124,6 +124,26 @@
  *   · La voz lee el texto SIN marcadores.
  *
  * ───────────────────────────────────────────────────────────────────────────
+ * v1.0.3 — 09 OCT 2026 · DOS PESTAÑAS: CENTRIMERCA Y ENCICLOPEDIA
+ * ───────────────────────────────────────────────────────────────────────────
+ * Decisión de Jal: fuera los cuatro planos estancos. Quedan dos pestañas:
+ *   · centri  → «Centrimerca»: catálogo, equipo, dudas comerciales y
+ *               administrativas, noticias. Es la de ARRANQUE.
+ *   · mercado → «Enciclopedia»: la Enciclopedia de frutas y verduras.
+ *
+ *   · DERIVACIÓN: centriLogic v1.0.7 devuelve [[IR:plano|etiqueta|pregunta]]
+ *     cuando la pregunta es de la otra pestaña. Aquí sale como un botón que
+ *     cambia de pestaña y hace allí la misma pregunta. Va dentro del texto,
+ *     como los otros botones: sobrevive al 504 y a reabrir la conversación.
+ *   · Una conversación guardada como producto, trabajar o dudas la devuelve
+ *     el backend como 'centri': vuelve a la pestaña Centrimerca.
+ *   · BIENVENIDA CON LISTA: cada salto de línea del texto de bienvenida es un
+ *     párrafo, y las líneas que empiezan por «·», «•» o «-» son una lista.
+ *     Todo se sigue escapando: no admite HTML.
+ *
+ * ⛔ REQUIERE centriLogic.web.js v1.0.7 y el page code de CENTRI v1.0.2.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
  * COMUNICACIÓN
  * ───────────────────────────────────────────────────────────────────────────
  *   Page → CE:  el.setAttribute('response', JSON.stringify({...}))
@@ -148,7 +168,7 @@
     return;
   }
 
-  const VERSION = '1.0.2';
+  const VERSION = '1.0.3';
   const TAG = `[CENTRI v${VERSION}]`;
 
   const LS_SIDEBAR = 'centri-sidebar-open';
@@ -254,34 +274,26 @@
 
      ⚠️ PROVISIONALES. Se redactan en firme cuando llegue la información
      específica de Centrimerca. No son contenido validado. */
+  // v1.0.3 — dos pestañas. Los textos del CMS (Entrenador) mandan sobre estos.
   const BRAND_PLANOS = {
+    centri: {
+      sub:          'Centrimerca',
+      welcomeTitle: 'CENTRI',
+      welcome:      'Puedo ayudarte con todo lo que tiene que ver con Centrimerca:\n' +
+                    '· Catálogo: qué frutas y hortalizas tenemos, sus variedades y la ficha de cada producto.\n' +
+                    '· Equipo: con quién hablar y cómo contactar con cada persona.\n' +
+                    '· Dudas comerciales y administrativas: te oriento y te pongo en contacto con quien lo lleva.\n' +
+                    '· Noticias de Centrimerca y del sector.\n' +
+                    'Y en la pestaña Enciclopedia tienes una enciclopedia abierta del mundo de la fruta y la verdura: historia, variedades, gastronomía, calibres, normativa, asociaciones y cifras del sector.',
+      placeholder:  'Pregunta a CENTRI…',
+      thinking:     'Buscando la respuesta…'
+    },
     mercado: {
-      sub:          'Mercado',
-      welcomeTitle: 'CENTRI · Mercado',
-      welcome:      'Pregúntame por la situación del mercado de frutas y hortalizas: temporadas, tendencias, oferta y demanda.',
-      placeholder:  'Pregunta por el mercado…',
-      thinking:     'Consultando el mercado…'
-    },
-    producto: {
-      sub:          'Producto',
-      welcomeTitle: 'CENTRI · Producto',
-      welcome:      'Pregúntame por el catálogo: variedades, calibres, orígenes y disponibilidad por temporada.',
-      placeholder:  'Pregunta por un producto…',
-      thinking:     'Buscando en el catálogo…'
-    },
-    trabajar: {
-      sub:          'Trabajar con Centrimerca',
-      welcomeTitle: 'CENTRI · Trabajar con Centrimerca',
-      welcome:      'Pregúntame cómo se trabaja con Centrimerca: procedimientos, condiciones y con quién contactar en cada caso.',
-      placeholder:  '¿Cómo funciona…?',
-      thinking:     'Buscando la respuesta…'
-    },
-    dudas: {
-      sub:          'Dudas',
-      welcomeTitle: 'CENTRI · Dudas',
-      welcome:      'Pregúntame cualquier duda sobre Centrimerca.',
-      placeholder:  'Escribe tu duda…',
-      thinking:     'Buscando la respuesta…'
+      sub:          'Enciclopedia',
+      welcomeTitle: 'Enciclopedia de frutas y verduras',
+      welcome:      'Pregúntame lo que quieras sobre el mundo de la fruta y la verdura: de dónde viene cada producto y cuál es su historia, sus variedades y su temporada, cómo se conserva y se cocina, calibres y normativa, asociaciones y cifras del sector.',
+      placeholder:  'Pregunta a la Enciclopedia…',
+      thinking:     'Consultando la Enciclopedia…'
     }
   };
 
@@ -299,15 +311,19 @@
      17 %, en silencio, durante meses.
 
      Decisión para CENTRI: arranque en MERCADO; el defecto del backend, en
-     DUDAS, que es donde menos daño hace el ruido. */
+     DUDAS, que es donde menos daño hace el ruido.
+
+     v1.0.3 — dos pestañas. Arranque en CENTRI (Centrimerca); el defecto del
+     backend pasa a MERCADO (Enciclopedia). Siguen sin coincidir.
+     ⚠️ Las etiquetas tienen su espejo en NOMBRE_PLANO de centriLogic: es el
+     nombre con el que el modelo y el botón de derivación se refieren a cada
+     pestaña. Si cambian aquí, cambian allí. */
   const PLANOS = [
-    { id: 'mercado',  label: 'Mercado',  title: 'Situación y temporadas del mercado' },
-    { id: 'producto', label: 'Producto', title: 'Catálogo, variedades y calibres' },
-    { id: 'trabajar', label: 'Trabajar con Centrimerca', title: 'Procedimientos, condiciones y contactos' },
-    { id: 'dudas',    label: 'Dudas',    title: 'Cualquier otra consulta' }
+    { id: 'centri',  label: 'Centrimerca',  title: 'Catálogo, equipo, dudas comerciales y administrativas, noticias' },
+    { id: 'mercado', label: 'Enciclopedia', title: 'Enciclopedia de frutas y verduras' }
   ];
 
-  const PLANO_ARRANQUE = 'mercado';
+  const PLANO_ARRANQUE = 'centri';
 
   function isMobileViewport() {
     try { return window.matchMedia('(max-width: 900px)').matches; }
@@ -903,6 +919,11 @@
         b.addEventListener('click', () => this._sendQuery(b.dataset.q || ''));
       });
 
+      // v1.0.3 — derivación → abre la otra pestaña y le hace la pregunta.
+      el.querySelectorAll('.acc-ir').forEach(b => {
+        b.addEventListener('click', () => this._irAPlano(b.dataset.plano || '', b.dataset.q || ''));
+      });
+
       // La voz lee el texto sin marcadores.
       const ttsBtn = el.querySelector('.tts-btn');
       if (ttsBtn) ttsBtn.addEventListener('click', () => this._onTtsButtonClick(messageId, partes.texto, ttsBtn));
@@ -919,9 +940,15 @@
     _extraerAcciones(text) {
       const botones = [];
       const preguntas = [];
+      const derivaciones = [];   // v1.0.3
       let limpio = String(text || '');
       limpio = limpio.replace(/\[\[BTN:([a-z]+)\|([^|\]]*)\|([^\]]*)\]\]/g, (m, tipo, etiqueta, href) => {
         botones.push({ tipo, etiqueta, href });
+        return '';
+      });
+      // v1.0.3 — [[IR:plano|etiqueta|pregunta]]: botón a la otra pestaña.
+      limpio = limpio.replace(/\[\[IR:([a-z]+)\|([^|\]]*)\|([^\]]*)\]\]/g, (m, plano, etiqueta, q) => {
+        derivaciones.push({ plano, etiqueta: etiqueta.trim(), q: q.trim() });
         return '';
       });
       limpio = limpio.replace(/\[\[PREGUNTA:([^\]]+)\]\]/g, (m, q) => {
@@ -929,9 +956,9 @@
         if (t) preguntas.push(t);
         return '';
       });
-      limpio = limpio.replace(/\[\[(ACCION|BTN|PREGUNTA):[^\]]*\]\]/g, '');
+      limpio = limpio.replace(/\[\[(ACCION|BTN|PREGUNTA|IR|DERIVAR):[^\]]*\]\]/g, '');
       limpio = limpio.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-      return { texto: limpio, botones, preguntas };
+      return { texto: limpio, botones, preguntas, derivaciones };
     }
 
     /**
@@ -949,11 +976,29 @@
       const preguntas = (partes.preguntas || []).map(q =>
         `<button type="button" class="acc-preg" data-q="${this._escape(q)}">${this._escape(q)}</button>`
       ).join('');
-      if (!botones && !preguntas) return '';
+      // v1.0.3 — derivación. Solo a una pestaña que existe; la etiqueta, si
+      // no llega, se compone con la de la pestaña.
+      const ir = (partes.derivaciones || []).filter(d => PLANOS.some(p => p.id === d.plano)).map(d => {
+        const pl = PLANOS.find(p => p.id === d.plano);
+        const etiqueta = d.etiqueta || `Preguntar en ${pl.label}`;
+        return `<button type="button" class="acc-btn acc-ir" data-plano="${this._escape(d.plano)}" data-q="${this._escape(d.q)}">${this._escape(etiqueta)} →</button>`;
+      }).join('');
+      if (!botones && !preguntas && !ir) return '';
       return `<div class="acciones">` +
-             (botones ? `<div class="acc-btns">${botones}</div>` : '') +
+             ((botones || ir) ? `<div class="acc-btns">${botones}${ir}</div>` : '') +
              (preguntas ? `<div class="acc-pregs">${preguntas}</div>` : '') +
              `</div>`;
+    }
+
+    /* v1.0.3 — Botón de derivación: cambia de pestaña (chat nuevo, como al
+       pulsar la pestaña) y hace allí la misma pregunta. Si hay una respuesta
+       en curso no hace nada: _sendQuery tampoco admitiría la pregunta. */
+    _irAPlano(plano, q) {
+      if (this._pending) return;
+      if (!PLANOS.some(p => p.id === plano)) return;
+      console.log(`${TAG} derivación → ${plano}`);
+      if (plano !== this._modo) this._setPlano(plano);
+      if (q) this._sendQuery(q);
     }
 
     _renderTtsButton(messageId) {
@@ -1052,10 +1097,31 @@
         <div class="welcome-inner">
           <div class="welcome-ornament">— ✦ —</div>
           <div class="welcome-title">${this._escape(this._brand.welcomeTitle || this._brand.name)}</div>
-          <div class="welcome-sub">${this._escape(this._brand.welcome)}</div>
+          <div class="welcome-sub">${this._welcomeHtml(this._brand.welcome)}</div>
         </div>
       `;
       messages.appendChild(el);
+    }
+
+    /* v1.0.3 — Texto de bienvenida → párrafos y lista. Cada línea es un
+       párrafo; las que empiezan por «·», «•» o «-» van a una lista. Todo se
+       escapa: el texto viene del CMS y no admite HTML. */
+    _welcomeHtml(texto) {
+      const out = [];
+      let enLista = false;
+      String(texto || '').split(/\r?\n/).forEach(linea => {
+        const t = linea.trim();
+        const item = t.match(/^[·•\-]\s*(.+)$/);
+        if (item) {
+          if (!enLista) { out.push('<ul class="welcome-list">'); enLista = true; }
+          out.push(`<li>${this._escape(item[1])}</li>`);
+          return;
+        }
+        if (enLista) { out.push('</ul>'); enLista = false; }
+        if (t) out.push(`<p>${this._escape(t)}</p>`);
+      });
+      if (enLista) out.push('</ul>');
+      return out.join('');
     }
 
     _clearWelcome() {
@@ -1782,6 +1848,9 @@
     transition: background .15s;
   }
   .acc-preg:hover { background: var(--accent-soft); }
+  /* v1.0.3 — botón de derivación a la otra pestaña: mismo aspecto que un
+     botón de acción, pero es <button> (no navega: cambia de pestaña). */
+  .acc-ir { cursor: pointer; }
 
   .tts-row { margin-top: 10px; }
   .tts-btn {
@@ -1830,6 +1899,11 @@
   .welcome-ornament { font-size: 16px; letter-spacing: 6px; color: var(--accent); opacity: .5; margin-bottom: 18px; }
   .welcome-title { font-size: 34px; font-weight: 600; color: var(--ink); margin-bottom: 16px; letter-spacing: -.02em; }
   .welcome-sub { font-size: 16.5px; line-height: 1.6; color: var(--ink-soft); max-width: 56ch; margin: 0 auto; }
+  /* v1.0.3 — bienvenida con párrafos y lista (ver _welcomeHtml) */
+  .welcome-sub p { margin: 0 0 10px; }
+  .welcome-sub p:last-child { margin-bottom: 0; }
+  .welcome-list { display: inline-block; text-align: left; margin: 2px 0 14px; padding-left: 1.1em; }
+  .welcome-list li { margin: 4px 0; }
 
   /* INPUT */
   .input-area { padding: 14px 22px 20px; }
