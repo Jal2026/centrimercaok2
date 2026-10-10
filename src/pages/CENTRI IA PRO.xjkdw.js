@@ -1,8 +1,12 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI · Page Code
  * Página:   CENTRI
- * VERSION:  1.0.1
- * FECHA:    25 Agosto 2026
+ * VERSION:  1.0.2
+ * FECHA:    09 Octubre 2026
+ *
+ * v1.0.2 — 09 OCT 2026 · DOS PESTAÑAS. Único cambio: PLANO_ARRANQUE pasa de
+ *   'mercado' a 'centri' (pestaña Centrimerca). Requiere centriLogic v1.0.7
+ *   y centriConsole v1.0.3.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * PROCEDENCIA
@@ -40,6 +44,7 @@
  *
  *   1. CUATRO PLANOS: mercado · producto · trabajar · dudas.
  *      Arranque en 'mercado' (ver PLANO_ARRANQUE).
+ *      v1.0.2: DOS — centri · mercado. Arranque en 'centri'.
  *
  *   2. functionsBase — GANCHO PRESENTE, ENVIADO VACÍO.
  *      ⚠️ Se intentó rellenarlo con wixLocation.baseUrl y DIO 404 en
@@ -94,15 +99,15 @@ import {
 
 const EL_ID = '#centriConsole';   // ← ajustar si el Element ID del editor difiere
 
-// Plano DE ARRANQUE. Un solo CENTRI con cuatro planos: el usuario cambia con
+// Plano DE ARRANQUE. Un solo CENTRI con dos pestañas: el usuario cambia con
 // los chips de la topbar, así que esto solo decide con cuál abre la pantalla.
-// Válidos: 'mercado' | 'producto' | 'trabajar' | 'dudas'.
+// Válidos (v1.0.2): 'centri' (Centrimerca) | 'mercado' (Enciclopedia).
 //
 // ⚠️ NO confundir con el plano por defecto DEL BACKEND, que es donde caen los
-// documentos del corpus sin plano asignado. Ese debe ser 'dudas'. Que ambos
+// documentos del corpus sin plano asignado. Ese es 'mercado'. Que ambos
 // coincidan es lo que en AKIRA metió un manual entero en el corpus del
 // consultor sin que nadie se enterara.
-const PLANO_ARRANQUE = 'mercado';
+const PLANO_ARRANQUE = 'centri';
 
 // Voz. Requiere backend/centriTTS.web.js desplegado + secret GOOGLE_SA_JSON.
 // La voz CONCRETA no se elige aquí: sale del CMS (voiceId). Este flag solo
@@ -121,7 +126,7 @@ const TTS_ENABLED = false;
 // absorbe) y la bola sigue visible.
 const CHAT_IA_ID = '';
 
-const V = 'CENTRI Page v1.0.1';
+const V = 'CENTRI Page v1.0.2';
 
 // ═══════════════════════════════════════════════════════════════════════════
 
