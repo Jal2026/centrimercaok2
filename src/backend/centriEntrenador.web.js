@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI · Entrenador (backend)
  * Archivo:  backend/centriEntrenador.web.js
- * VERSION:  1.0.1
- * FECHA:    08 Octubre 2026
+ * VERSION:  1.0.2
+ * FECHA:    09 Octubre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
  * PROCEDENCIA
@@ -101,6 +101,19 @@
  *
  * ⛔ REQUIERE el campo `fuentes` (Texto) en CentriAlignment. Escribir a un
  *    campo inexistente NO falla: wixData ignora la clave en silencio.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * v1.0.2 — 09 OCT 2026 · DOS PESTAÑAS: CENTRIMERCA Y ENCICLOPEDIA
+ * ───────────────────────────────────────────────────────────────────────────
+ * Mismo cambio que centriLogic v1.0.7, y con la misma lista:
+ *   · Planos: centri (Centrimerca) y mercado (Enciclopedia).
+ *   · PLANO_DEFECTO pasa a 'mercado'.
+ *   · ALIAS: producto, trabajar y dudas se leen como centri. Al PUBLICAR
+ *     centri se archivan también los alignments publicados de esos tres
+ *     planos, y la versión sigue su numeración.
+ *   · Si hay más de una fila para un plano (la suya y la de un plano
+ *     antiguo), manda la guardada con ese plano tal cual.
+ *   · META_POR_PLANO: un molde por pestaña.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -114,7 +127,7 @@ import { currentMember } from 'wix-members-backend';
 import { elevate } from 'wix-auth';
 import { collections } from 'wix-data.v2';
 
-const VERSION = '1.0.1';
+const VERSION = '1.0.2';
 const TAG = `[CentriEntrenador][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -125,12 +138,25 @@ const C_ADMINS    = 'CentriAdmins';
 const SECRET_API = 'CENTRIMERCA';
 const MODEL = 'claude-sonnet-4-6';
 
-const PLANOS_VALIDOS = ['mercado', 'producto', 'trabajar', 'dudas'];
-const PLANO_DEFECTO  = 'dudas';   // idéntico al de centriLogic. No desincronizar.
+// v1.0.2 — dos pestañas. ⚠️ Lista, defecto y alias IDÉNTICOS a los de
+// centriLogic.web.js v1.0.7. No desincronizar.
+const PLANOS_VALIDOS = ['centri', 'mercado'];
+const PLANO_DEFECTO  = 'mercado';
+const ALIAS_PLANO    = { producto: 'centri', trabajar: 'centri', dudas: 'centri' };
 
 function _normPlano(v) {
   const s = (v === null || v === undefined) ? '' : String(v).trim().toLowerCase();
-  return s || PLANO_DEFECTO;
+  if (!s) return PLANO_DEFECTO;
+  return ALIAS_PLANO[s] || s;
+}
+
+/* v1.0.2 — La fila de un plano en una lista de alignments: primero la que
+   está guardada con ese plano tal cual; si no hay, la de un plano antiguo que
+   se lee como él (ALIAS_PLANO). Respeta el orden de la lista. */
+function _filaDelPlano(items, plano) {
+  const lista = items || [];
+  const exacta = lista.find(a => String((a && a.modo) || '').trim().toLowerCase() === plano);
+  return exacta || lista.find(a => _normPlano(a && a.modo) === plano) || null;
 }
 
 function _planoPedido(v) {
@@ -439,8 +465,9 @@ export const cargarConfigEntrenador = webMethod(
         })
       ]);
 
-      const borrador  = (borradorRes.items || []).find(a => _normPlano(a.modo) === plano) || null;
-      const publicada = (publicadasRes.items || []).find(a => _normPlano(a.modo) === plano) || null;
+      // v1.0.2 — primero la fila del plano tal cual (ver _filaDelPlano).
+      const borrador  = _filaDelPlano(borradorRes.items, plano);
+      const publicada = _filaDelPlano(publicadasRes.items, plano);
 
       // Todos los documentos, activos e inactivos, con su plano y su tamaño.
       // ⚠️ NO se devuelve `contenido`: con un corpus grande, mandar el texto
@@ -510,7 +537,7 @@ export const guardarAlignment = webMethod(
         .eq('status', 'borrador')
         .limit(50)
         .find(AUTH);
-      const existente = (existRes.items || []).find(a => _normPlano(a.modo) === plano) || null;
+      const existente = _filaDelPlano(existRes.items, plano);   // v1.0.2
 
       const registro = {
         modo: plano,
@@ -585,6 +612,8 @@ export const publicarAlignment = webMethod(
       // un plano dejaba a los otros SIN IDENTIDAD PUBLICADA, en silencio,
       // cayendo a la de por defecto. Nadie se entera hasta que alguien nota
       // que ese plano responde raro.
+      // v1.0.2 — "del mismo plano" incluye los alias: publicar centri archiva
+      // también los alignments publicados de producto, trabajar y dudas.
       for (const ant of delPlano) {
         if (ant._id === alignmentId) continue;
         ant.status = 'archivado';
@@ -658,7 +687,7 @@ export const testCentri = webMethod(
           .descending('publicationDate')
           .limit(50)
           .find(AUTH);
-        config = (pub.items || []).find(a => _normPlano(a.modo) === plano) || null;
+        config = _filaDelPlano(pub.items, plano);   // v1.0.2
       }
       if (!config) return { ok: false, error: 'No hay configuración para este plano. Guarda una primero.' };
 
@@ -751,22 +780,15 @@ REGLAS DURAS:
 - Español, texto plano, entre 80 y 200 palabras.
 - Responde SOLO con el texto de la identidad, sin explicaciones ni comillas.`;
 
+// v1.0.2 — un molde por pestaña.
 const META_POR_PLANO = {
+  centri: `${META_BASE}
+
+PESTAÑA: CENTRIMERCA. El asistente atiende todo lo que tiene que ver con Centrimerca: el catálogo de producto, el contacto con la persona adecuada del equipo, las dudas sobre la relación comercial y administrativa con la empresa y sus noticias. Su rasgo definitorio es la exactitud: reproduce los datos tal cual, sin aproximar. Punto crítico: quien pregunta puede ser un cliente de años o alguien que aún no lo es, y el asistente debe servir igual a los dos sin dar por supuesta ninguna relación previa.`,
+
   mercado: `${META_BASE}
 
-PLANO: MERCADO. El asistente aporta contexto sobre el mercado de frutas y hortalizas: temporadas, comportamiento de la oferta y la demanda, factores que mueven los precios. NO da cotizaciones ni precios del día.`,
-
-  producto: `${META_BASE}
-
-PLANO: PRODUCTO. El asistente informa sobre el catálogo: variedades, calibres, orígenes, formatos y calendario de temporada. Su rasgo definitorio es la exactitud: reproduce los datos del catálogo tal cual, sin aproximar.`,
-
-  trabajar: `${META_BASE}
-
-PLANO: TRABAJAR CON CENTRIMERCA. El asistente explica procedimientos, condiciones y a quién dirigirse. Punto crítico: quien pregunta puede ser un cliente de años o alguien que aún no lo es, y el asistente debe servir igual a los dos sin dar por supuesta ninguna relación previa.`,
-
-  dudas: `${META_BASE}
-
-PLANO: DUDAS. El asistente resuelve preguntas generales sobre Centrimerca apoyándose en las preguntas frecuentes de la empresa. Es el plano de entrada: tono acogedor y capacidad de derivar al plano adecuado cuando la pregunta encaja mejor en otro.`
+PESTAÑA: ENCICLOPEDIA DE FRUTAS Y VERDURAS. El asistente responde con conocimiento abierto sobre el mundo de las frutas y las verduras: historia y origen de cada producto, variedades, temporada, conservación, gastronomía, calibres, normativa, asociaciones y cifras del sector. NO da cotizaciones ni precios del día.`
 };
 
 export const generarPromptCentri = webMethod(
