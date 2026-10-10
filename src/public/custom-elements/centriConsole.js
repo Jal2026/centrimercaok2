@@ -2,8 +2,8 @@
  * CENTRIMERCA — CENTRI Console (Wix Custom Element)
  * Archivo:  public/custom-elements/centriConsole.js
  * Tag name: centri-console
- * VERSION:  1.0.3
- * FECHA:    09 Octubre 2026
+ * VERSION:  1.0.4
+ * FECHA:    10 Octubre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
  * PROCEDENCIA
@@ -144,6 +144,27 @@
  * ⛔ REQUIERE centriLogic.web.js v1.0.7 y el page code de CENTRI v1.0.2.
  *
  * ───────────────────────────────────────────────────────────────────────────
+ * v1.0.4 — 10 OCT 2026 · LA PREGUNTA FINAL, PEGADA A SUS RESPUESTAS RÁPIDAS
+ * ───────────────────────────────────────────────────────────────────────────
+ * Detectado por Jal: con «Ver ficha: Kiwi» entre la pregunta «¿Quieres
+ * hablar con un comercial?» y sus botones Sí/No, el Sí/No parecía contestar
+ * a la ficha. Ahora, si la respuesta trae botones Y respuestas rápidas, la
+ * pregunta con la que acaba se pinta debajo de los botones, justo encima de
+ * sus respuestas rápidas:
+ *     texto → [Ver ficha] → ¿Quieres hablar con un comercial? → [Sí] [No]
+ * Es solo presentación: el texto guardado no cambia y la voz lo lee entero.
+ *
+ * Y UNA SOLA CONVERSACIÓN (decisión de Jal): con una conversación abierta,
+ * cambiar de pestaña —con el chip o con el botón de derivar— ya NO abre chat
+ * nuevo. La conversación sigue y lo siguiente se responde con la otra
+ * pestaña; el botón de derivar hace allí la pregunta, en la misma
+ * conversación. Solo se repintan la barra superior y el campo de escritura:
+ * _render() borraría los mensajes. Sin conversación (pantalla de bienvenida)
+ * cambiar de pestaña sigue enseñando la bienvenida de la otra. Para empezar
+ * de cero, «+ Nueva». Requiere centriLogic v1.0.8, que guarda con la sesión
+ * la última pestaña usada.
+ * *
+ * ───────────────────────────────────────────────────────────────────────────
  * COMUNICACIÓN
  * ───────────────────────────────────────────────────────────────────────────
  *   Page → CE:  el.setAttribute('response', JSON.stringify({...}))
@@ -168,7 +189,7 @@
     return;
   }
 
-  const VERSION = '1.0.3';
+  const VERSION = '1.0.4';
   const TAG = `[CENTRI v${VERSION}]`;
 
   const LS_SIDEBAR = 'centri-sidebar-open';
@@ -282,6 +303,7 @@
       welcome:      'Puedo ayudarte con todo lo que tiene que ver con Centrimerca:\n' +
                     '· Catálogo: qué frutas y hortalizas tenemos, sus variedades y la ficha de cada producto.\n' +
                     '· Equipo: con quién hablar y cómo contactar con cada persona.\n' +
+                    '· Hacerte cliente y usar el Área de Clientes: acceso, tutorial y ayuda.\n' +
                     '· Dudas comerciales y administrativas: te oriento y te pongo en contacto con quien lo lleva.\n' +
                     '· Noticias de Centrimerca y del sector.\n' +
                     'Y en la pestaña Enciclopedia tienes una enciclopedia abierta del mundo de la fruta y la verdura: historia, variedades, gastronomía, calibres, normativa, asociaciones y cifras del sector.',
@@ -488,12 +510,44 @@
       if (!plano || plano === this._modo) return;
       if (!PLANOS.some(p => p.id === plano)) return;
       console.log(`${TAG} plano → ${plano}`);
+      // v1.0.4 — con conversación abierta, la conversación sigue. Mientras
+      // se espera una respuesta no se cambia: llegaría con la otra pestaña.
+      if (this._hasMessages || this._sessionId) {
+        if (this._pending || this._polling) return;
+        this._cambiarPestanaEnConversacion(plano);
+        return;
+      }
       this._modo = plano;
       this._aplicarBrandDelPlano();
       this._render();
       this._bindEvents();
       this._resetToNewChat();
       this._renderChats();
+    }
+
+    /* v1.0.4 — Cambio de pestaña sin cortar la conversación. Solo se tocan
+       la barra superior (chip activo y subtítulo) y el texto del campo de
+       escritura: un _render() reconstruiría el Shadow DOM y se llevaría los
+       mensajes por delante. */
+    _cambiarPestanaEnConversacion(plano) {
+      this._modo = plano;
+      this._aplicarBrandDelPlano();
+      const root = this.shadowRoot;
+      root.querySelectorAll('.tb-chip').forEach(c => c.classList.toggle('active', c.dataset.plano === plano));
+      const marca = root.querySelector('.tb-brand');
+      let sub = root.querySelector('.tb-sub');
+      if (this._brand.sub) {
+        if (!sub && marca) {
+          sub = document.createElement('div');
+          sub.className = 'tb-sub';
+          marca.appendChild(sub);
+        }
+        if (sub) sub.textContent = this._brand.sub;
+      } else if (sub) {
+        sub.remove();
+      }
+      const input = root.getElementById('chatInput');
+      if (input) input.placeholder = this._brand.placeholder || '';
     }
 
     _applyChats(payload) {
@@ -911,7 +965,9 @@
       el.dataset.messageId = messageId;
       // v1.0.2 — los marcadores salen del texto y se pintan como botones.
       const partes = this._extraerAcciones(text);
-      el.innerHTML = this._formatEditorial(partes.texto) + this._renderAcciones(partes) + this._renderTtsButton(messageId);
+      // v1.0.4 — la pregunta final va con sus respuestas rápidas, no encima de los botones.
+      const sep = this._separarPreguntaFinal(partes);
+      el.innerHTML = this._formatEditorial(sep.cuerpo) + this._renderAcciones(partes, sep.pregunta) + this._renderTtsButton(messageId);
       this.shadowRoot.getElementById('messages').appendChild(el);
 
       // Pregunta sugerida → se envía como si la escribiera el usuario.
@@ -965,7 +1021,23 @@
      * v1.0.2 — Botones como <a href> nativos (sin JS). Solo tel:, mailto:,
      * http(s) y rutas de la propia web; lo demás no se pinta.
      */
-    _renderAcciones(partes) {
+    /* v1.0.4 — Si hay botones y respuestas rápidas, separa la pregunta con la
+       que acaba el texto (la última frase, desde su «¿», si termina en «?»)
+       para pintarla entre los botones y las respuestas rápidas. En cualquier
+       otro caso devuelve el texto tal cual. */
+    _separarPreguntaFinal(partes) {
+      const texto = String(partes.texto || '');
+      const hayBotones = (partes.botones || []).length > 0 || (partes.derivaciones || []).length > 0;
+      const hayRapidas = (partes.preguntas || []).length > 0;
+      const t = texto.replace(/\s+$/, '');
+      if (!hayBotones || !hayRapidas || !/\?$/.test(t)) return { cuerpo: texto, pregunta: '' };
+      const inicioLinea = t.lastIndexOf('\n') + 1;
+      const abre = t.indexOf('¿', inicioLinea) >= 0 ? t.lastIndexOf('¿') : inicioLinea;
+      const ini = Math.max(abre, inicioLinea);
+      return { cuerpo: t.slice(0, ini).replace(/\s+$/, ''), pregunta: t.slice(ini).trim() };
+    }
+
+    _renderAcciones(partes, preguntaFinal) {
       const valido = (h) => /^(tel:|mailto:|https?:\/\/|\/(?!\/))/i.test(String(h || ''));
       const botones = (partes.botones || []).filter(b => valido(b.href)).map(b => {
         const pagina = /^(https?:|\/)/i.test(b.href);
@@ -986,6 +1058,8 @@
       if (!botones && !preguntas && !ir) return '';
       return `<div class="acciones">` +
              ((botones || ir) ? `<div class="acc-btns">${botones}${ir}</div>` : '') +
+             // v1.0.4 — la pregunta final, entre los botones y sus respuestas rápidas.
+             (preguntaFinal ? `<div class="acc-q">${this._formatEditorial(preguntaFinal)}</div>` : '') +
              (preguntas ? `<div class="acc-pregs">${preguntas}</div>` : '') +
              `</div>`;
     }
@@ -994,7 +1068,7 @@
        pulsar la pestaña) y hace allí la misma pregunta. Si hay una respuesta
        en curso no hace nada: _sendQuery tampoco admitiría la pregunta. */
     _irAPlano(plano, q) {
-      if (this._pending) return;
+      if (this._pending || this._polling) return;   // v1.0.4: también durante el polling
       if (!PLANOS.some(p => p.id === plano)) return;
       console.log(`${TAG} derivación → ${plano}`);
       if (plano !== this._modo) this._setPlano(plano);
@@ -1851,6 +1925,8 @@
   /* v1.0.3 — botón de derivación a la otra pestaña: mismo aspecto que un
      botón de acción, pero es <button> (no navega: cambia de pestaña). */
   .acc-ir { cursor: pointer; }
+  /* v1.0.4 — pregunta final pegada a sus respuestas rápidas */
+  .acc-q { margin-top: 6px; }
 
   .tts-row { margin-top: 10px; }
   .tts-btn {
