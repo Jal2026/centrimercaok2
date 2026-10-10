@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI · Backend
  * Archivo:  backend/centriLogic.web.js
- * VERSION:  1.0.6
- * FECHA:    08 Octubre 2026
+ * VERSION:  1.0.7
+ * FECHA:    09 Octubre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
  * PROCEDENCIA
@@ -70,6 +70,7 @@
  * PLANOS
  * ───────────────────────────────────────────────────────────────────────────
  * mercado · producto · trabajar · dudas
+ * (v1.0.7: centri · mercado, y PLANO_DEFECTO = 'mercado'. Ver nota v1.0.7.)
  *
  * El plano lo pide el usuario con los chips y llega por `modo`. El endpoint
  * es PÚBLICO: se valida contra la lista cerrada y cualquier otra cosa cae al
@@ -247,6 +248,40 @@
  * al ofrecer un comercial) es criterio y está en el Entrenador.
  *
  *   · MAX_PREGUNTAS 3 → 6: una respuesta rápida por cada comercial del equipo.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * v1.0.7 — 09 OCT 2026 · DOS PESTAÑAS: CENTRIMERCA Y ENCICLOPEDIA
+ * ───────────────────────────────────────────────────────────────────────────
+ * Decisión de Jal: los cuatro planos estancos obligaban al cliente a elegir
+ * pestaña antes de preguntar, y una pregunta en la pestaña equivocada se
+ * quedaba sin salida. Quedan dos:
+ *
+ *   · centri  → pestaña CENTRIMERCA. Sustituye a producto, trabajar y dudas:
+ *               catálogo, contacto con el equipo, dudas comerciales y
+ *               administrativas y noticias. Su corpus son los datos del CMS
+ *               que se marquen en el Entrenador más los documentos
+ *               institucionales.
+ *   · mercado → pestaña ENCICLOPEDIA DE FRUTAS Y VERDURAS. Conocimiento
+ *               abierto del modelo apoyado en el corpus estático del sector,
+ *               que así no viaja en cada pregunta de la otra pestaña. Se
+ *               conserva el id 'mercado': sus documentos, su alignment y las
+ *               conversaciones ya guardadas siguen valiendo sin migrar nada.
+ *
+ *   · DERIVACIÓN: si la pregunta es de la otra pestaña, el modelo escribe
+ *     [[DERIVAR:centri]] o [[DERIVAR:mercado]] y este archivo lo cambia por
+ *     [[IR:plano|etiqueta|pregunta]]. La consola v1.0.3 lo pinta como un botón
+ *     que abre esa pestaña y le hace la misma pregunta. Nadie se queda en una
+ *     pestaña que no le puede contestar.
+ *   · ALIAS: producto, trabajar y dudas se leen como centri — sesiones
+ *     antiguas, alignments y documentos. Una conversación de producto
+ *     reabierta vuelve a la pestaña Centrimerca, y publicar centri en el
+ *     Entrenador archiva los alignments de los tres planos antiguos.
+ *   · PLANO_DEFECTO pasa a 'mercado'. Mismo criterio de siempre: un documento
+ *     sin plano cae en la pestaña donde menos daño hace, que ahora es la
+ *     Enciclopedia. La de Centrimerca tiene que seguir siendo ligera.
+ *
+ * ⛔ REQUIERE la consola v1.0.3, el page code de CENTRI v1.0.2 y el
+ *    Entrenador v1.0.2 (backend + widget).
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -255,7 +290,7 @@ import { fetch } from 'wix-fetch';
 import wixData from 'wix-data';
 import { getSecret } from 'wix-secrets-backend';
 
-const VERSION = '1.0.6';
+const VERSION = '1.0.7';
 const TAG = `[CentriLogic][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -288,11 +323,10 @@ const HISTORY_LIMIT = 10;     // turnos (se leen HISTORY_LIMIT*2 filas)
 // en cuanto lo esté: el techo de AKIRA se puso a ojo en 1.000 filas y devolvió
 // totales erróneos con aplomo hasta que alguien midió.
 const MAX_DOC_CHARS = 12000;
+// v1.0.7 — dos planos. ⚠️ ESPEJO de TOPES en el widget del Entrenador.
 const DOC_CHARS_POR_PLANO = {
-  mercado:  90000,   // dimensionado 25-ago con el corpus real: 50.839 activos
-  producto: 90000,   // catálogo de Centrimerca. Pendiente de contenido real
-  trabajar: 60000,
-  dudas:    60000
+  centri:   60000,   // institucional: "Acerca de", FAQ con respuestas, tutorial
+  mercado:  90000    // dimensionado 25-ago con el corpus real: 50.839 activos
 };
 
 function _docCharsDelPlano(plano) {
@@ -314,14 +348,35 @@ const SECRET_API = 'CENTRIMERCA';
 // PLANOS
 // ═══════════════════════════════════════════════════════════════════════════
 
-const PLANOS_VALIDOS = ['mercado', 'producto', 'trabajar', 'dudas'];
+// v1.0.7 — dos pestañas. ⚠️ MISMA LISTA, MISMO DEFECTO Y MISMOS ALIAS en
+// centriEntrenador.web.js. Si se toca uno, se toca el otro.
+const PLANOS_VALIDOS = ['centri', 'mercado'];
 
-// Ver la nota de cabecera: NO coincide con el plano de arranque de la consola.
-const PLANO_DEFECTO = 'dudas';
+// Ver la nota de cabecera: NO coincide con el plano de arranque de la consola
+// ('centri'). Un documento sin plano cae en la Enciclopedia, nunca en la
+// pestaña Centrimerca.
+const PLANO_DEFECTO = 'mercado';
+
+// Planos de v1.0.6 y anteriores. Sesiones, alignments y documentos guardados
+// con ellos se leen como la pestaña Centrimerca.
+const ALIAS_PLANO = { producto: 'centri', trabajar: 'centri', dudas: 'centri' };
+
+// Nombre de cada pestaña, tal y como lo lee el modelo y como sale en el botón
+// de derivación. ⚠️ Las etiquetas de las pestañas en pantalla viven en la
+// consola (PLANOS): si cambian allí, cambian aquí.
+const NOMBRE_PLANO = {
+  centri:  'Centrimerca',
+  mercado: 'Enciclopedia de frutas y verduras'
+};
+const ETIQUETA_DERIVAR = {
+  centri:  'Preguntar en Centrimerca',
+  mercado: 'Preguntar en la Enciclopedia'
+};
 
 function _normPlano(v) {
   const s = (v === null || v === undefined) ? '' : String(v).trim().toLowerCase();
-  return s || PLANO_DEFECTO;   // vacío (documento o alignment) = plano por defecto
+  if (!s) return PLANO_DEFECTO;   // vacío (documento o alignment) = plano por defecto
+  return ALIAS_PLANO[s] || s;
 }
 
 function _planoPedido(modo) {
@@ -350,20 +405,18 @@ function _planoPedido(modo) {
  *                bloques de fuentes de los 16 documentos de sector: la
  *                instrucción pedía parafrasear justo lo que no se puede
  *                parafrasear. Era el pendiente P-14.
- *   · PRODUCTO → variedades, calibres y orígenes. Un calibre parafraseado es
- *                un calibre inventado. LITERAL.
- *   · TRABAJAR → procedimientos y contactos. LITERAL: un nombre o un paso mal
- *                copiado manda a alguien a la persona equivocada.
- *   · DUDAS    → FAQs redactadas por Centrimerca. Se respeta su redacción.
+ *                v1.0.7: es la Enciclopedia. Mismo criterio mixto; el ámbito
+ *                abierto pasa a ser todo el mundo de las frutas y verduras.
+ *   · CENTRI   → v1.0.7, une PRODUCTO, TRABAJAR y DUDAS: catálogo,
+ *                procedimientos, contactos y textos de la empresa. LITERAL:
+ *                un calibre parafraseado es un calibre inventado, y un nombre
+ *                o un paso mal copiado manda a alguien a la persona
+ *                equivocada.
  */
 const INSTRUCCION_CORPUS = {
-  mercado: 'Este material es tu base sobre el mercado de frutas y hortalizas: temporadas, oferta y demanda, factores que mueven los precios y marco normativo del sector. NO ES EL LÍMITE DE LO QUE PUEDES RESPONDER: cuando la pregunta sea del sector y no esté cubierta aquí, respóndela igualmente con tu propio conocimiento, con la misma naturalidad y sin anunciar que no la tienes documentada. Donde el material sí diga algo, manda él sobre lo que sepas por tu cuenta. La EXPLICACIÓN la das con tus palabras, integrándola con naturalidad. Lo que está ESCRITO se reproduce EXACTAMENTE como aparece —cifras, calibres, categorías, plazos, tipos impositivos, identificadores de norma y las fuentes de referencia del final de cada documento—: no lo reformules ni lo aproximes, y no completes ni deduzcas nunca una URL, un número de norma o un nombre de organismo que no esté escrito. Los bloques de nota interna dirigidos a ti no se citan ni se mencionan. Si te preguntan por un precio concreto de hoy, di que los precios se confirman con Centrimerca directamente: aquí no tienes cotizaciones en tiempo real.',
+  centri: 'Este material son textos de Centrimerca: quiénes somos, cómo trabajamos y cómo se hacen las cosas con nosotros. Junto con los datos que lees con la herramienta —catálogo, equipo, noticias—, es tu ÚNICA fuente sobre Centrimerca. Reproduce EXACTAMENTE nombres, cargos, canales de contacto, condiciones, pasos, variedades, calibres y formatos tal y como aparecen: no los reformules, no los traduzcas y no los aproximes. Si algo sobre Centrimerca no está cubierto, dilo en lugar de deducirlo. Escribe de forma que sirva igual a quien ya es cliente y a quien aún no lo es: no des por supuesta ninguna relación previa.',
 
-  producto: 'Este material es el catálogo de Centrimerca: variedades, calibres, orígenes, formatos y calendario de temporada. Es tu ÚNICA fuente sobre producto. Reproduce EXACTAMENTE los nombres de variedad, los calibres, los formatos y las denominaciones de origen tal y como aparecen: no los reformules, no los traduzcas y no los aproximes. Si el catálogo no cubre lo que se pregunta, dilo en lugar de deducirlo — nunca describas un producto, un calibre o una disponibilidad que no esté escrita aquí.',
-
-  trabajar: 'Este material describe cómo se trabaja con Centrimerca: procedimientos, condiciones y a quién dirigirse en cada caso. Reproduce EXACTAMENTE los nombres, los cargos, los canales de contacto y el orden de los pasos tal y como aparecen. Si algo no está cubierto, dilo y remite a Centrimerca en lugar de deducir un procedimiento. Escribe siempre de forma que sirva igual a alguien que ya es cliente y a alguien que aún no lo es: no des por supuesta ninguna relación previa.',
-
-  dudas: 'Este material son las preguntas frecuentes redactadas por Centrimerca. Respeta su contenido y su redacción: son la respuesta oficial de la empresa. Si la pregunta no está cubierta, dilo y remite a Centrimerca en lugar de improvisar una respuesta.'
+  mercado: 'Este material es la base documental de la Enciclopedia de frutas y verduras: temporadas, categorías y calibres de referencia, normativa, sellos de calidad y de origen, conservación, logística y contexto del mercado. NO ES EL LÍMITE DE LO QUE PUEDES RESPONDER: cualquier pregunta sobre el mundo de las frutas y las verduras —historia y origen de cada producto, variedades, botánica, cultivo, temporada, nutrición, gastronomía, conservación, calibres, normativa, asociaciones y organismos del sector, cifras de producción y consumo— respóndela con tu propio conocimiento, con la misma naturalidad y sin anunciar que no la tienes documentada. Donde el material sí diga algo, manda él sobre lo que sepas por tu cuenta. La EXPLICACIÓN la das con tus palabras, integrándola con naturalidad. Lo que está ESCRITO se reproduce EXACTAMENTE como aparece —cifras, calibres, categorías, plazos, tipos impositivos, identificadores de norma y las fuentes de referencia del final de cada documento—: no lo reformules ni lo aproximes, y al señalar dónde ampliar no completes ni deduzcas nunca una URL, un número de norma o un nombre de organismo que no esté escrito. Los bloques de nota interna dirigidos a ti no se citan ni se mencionan. Si te preguntan por un precio concreto de hoy, di que los precios se confirman con Centrimerca directamente: aquí no tienes cotizaciones en tiempo real.'
 };
 
 function _instruccionCorpus(plano) {
@@ -382,16 +435,11 @@ function _instruccionCorpus(plano) {
 function _identidadPorDefecto(plano, marca) {
   const base = `Eres CENTRI, la inteligencia artificial de ${marca}, mayorista de frutas y hortalizas en Mercamadrid. Hablas en español, con criterio profesional y sin rodeos.`;
 
+  // v1.0.7 — dos pestañas.
   if (plano === 'mercado') {
-    return `${base} Trabajas en el plano MERCADO: aportas contexto sobre temporadas, comportamiento del mercado y factores de oferta y demanda. No das cotizaciones ni precios del día.`;
+    return `${base} Trabajas en la ENCICLOPEDIA DE FRUTAS Y VERDURAS: respondes con conocimiento abierto sobre el mundo de las frutas y las verduras —historia y origen, variedades, temporada, gastronomía, calibres, normativa, asociaciones y cifras del sector—. No das cotizaciones ni precios del día.`;
   }
-  if (plano === 'producto') {
-    return `${base} Trabajas en el plano PRODUCTO: informas sobre el catálogo, variedades, calibres, orígenes y calendario de temporada, con los datos exactos del catálogo.`;
-  }
-  if (plano === 'trabajar') {
-    return `${base} Trabajas en el plano TRABAJAR CON CENTRIMERCA: explicas procedimientos, condiciones y a quién dirigirse. Quien pregunta puede ser tanto un cliente actual como alguien que está valorando serlo: no des por supuesta ninguna relación previa.`;
-  }
-  return `${base} Trabajas en el plano DUDAS: resuelves preguntas generales sobre Centrimerca apoyándote en las preguntas frecuentes de la empresa.`;
+  return `${base} Trabajas en la pestaña CENTRIMERCA: informas sobre el catálogo de Centrimerca con sus datos exactos, pones en contacto con la persona adecuada del equipo, resuelves dudas sobre la relación comercial y administrativa con Centrimerca y cuentas sus noticias. Quien pregunta puede ser tanto un cliente actual como alguien que está valorando serlo: no des por supuesta ninguna relación previa.`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -433,7 +481,10 @@ async function _getAlignments() {
  */
 function _alignmentDelPlano(alignments, plano) {
   const lista = alignments || [];
-  return lista.find(a => _normPlano(a && a.modo) === plano) || null;
+  // v1.0.7 — primero la fila guardada con ESE plano; si no la hay, la de un
+  // plano antiguo que se lee como él (ALIAS_PLANO), la publicada más reciente.
+  const exacta = lista.find(a => String((a && a.modo) || '').trim().toLowerCase() === plano);
+  return exacta || lista.find(a => _normPlano(a && a.modo) === plano) || null;
 }
 
 /**
@@ -843,9 +894,30 @@ function _bloqueDatos(fuentes) {
   return lineas.join('\n');
 }
 
+/*
+ * v1.0.7 — Las dos pestañas y cómo se deriva de una a otra. Es MECÁNICA del
+ * sistema (qué pestañas hay, qué cubre cada una, cómo sale el botón), no
+ * criterio: va siempre, en las dos.
+ */
+function _bloquePestanas(plano) {
+  const otro = plano === 'centri' ? 'mercado' : 'centri';
+  return [
+    '--- PESTAÑAS ---',
+    'CENTRI tiene dos pestañas:',
+    `· ${NOMBRE_PLANO.centri}: el catálogo de Centrimerca, el contacto con el equipo, las dudas comerciales y administrativas con Centrimerca y las noticias de Centrimerca y del sector.`,
+    `· ${NOMBRE_PLANO.mercado}: conocimiento abierto sobre el mundo de las frutas y las verduras —historia y origen, variedades, cultivo y temporada, nutrición, gastronomía, conservación, calibres, normativa, asociaciones y cifras del sector—.`,
+    `Estás en la pestaña ${NOMBRE_PLANO[plano]}. Lo que puedas responder aquí, respóndelo aquí. Si lo que te preguntan no se resuelve en esta pestaña pero sí en la otra, no lo respondas tú: dilo en una frase y escribe [[DERIVAR:${otro}]] en una línea propia al final. El sistema lo convierte en un botón que abre la pestaña ${NOMBRE_PLANO[otro]} y le hace la misma pregunta. Si la pregunta mezcla las dos cosas, responde tu parte y deriva el resto. No uses ese marcador para nada más.`
+  ].join('\n');
+}
+
 const RE_BTN      = /\[\[BTN:[^\]]*\]\]/g;
 const RE_ACCION   = /\[\[ACCION:\s*([a-zA-Z0-9_-]+)\s*\]\]/g;
 const RE_PREGUNTA = /\[\[PREGUNTA:\s*([^\]]+?)\s*\]\]/g;
+// v1.0.7 — derivación a la otra pestaña.
+const RE_IR       = /\[\[IR:[^\]]*\]\]/g;
+const RE_DERIVAR  = /\[\[DERIVAR:\s*([a-zA-Z_-]+)\s*\]\]/g;
+// Si el modelo nombra la pestaña en vez de su id, se acepta igual.
+const DESTINO_DERIVAR = { centrimerca: 'centri', enciclopedia: 'mercado' };
 
 /*
  * Respuesta del modelo → texto que se guarda y se envía a la consola.
@@ -856,12 +928,16 @@ const RE_PREGUNTA = /\[\[PREGUNTA:\s*([^\]]+?)\s*\]\]/g;
  *   · [[ACCION:aN]] → [[BTN:tipo|etiqueta|enlace]] si el id existe en esta
  *     pregunta. Un id desconocido desaparece.
  *   · [[PREGUNTA:...]] se conserva solo si el plano lo permite.
+ *   · v1.0.7 — [[DERIVAR:plano]] → [[IR:plano|etiqueta|pregunta]] si el
+ *     plano existe y es el OTRO. Uno por respuesta. La pregunta es la que
+ *     acaba de hacer el usuario, para que la otra pestaña la reciba tal cual.
+ *     Un [[IR:...]] escrito por el modelo se BORRA, igual que un [[BTN:...]].
  *
  * El resultado se guarda tal cual en CentriMessages: así el botón sobrevive
  * al 504 (el polling lee del historial) y a la reapertura de la conversación.
  */
-function _resolverMarcadores(texto, reg, permitirPreguntas) {
-  let s = String(texto || '').replace(RE_BTN, '');
+function _resolverMarcadores(texto, reg, permitirPreguntas, deriv) {
+  let s = String(texto || '').replace(RE_BTN, '').replace(RE_IR, '');
   const usados = {};
   let botones = 0;
   s = s.replace(RE_ACCION, (m, id) => {
@@ -881,6 +957,15 @@ function _resolverMarcadores(texto, reg, permitirPreguntas) {
     preguntas++;
     return `[[PREGUNTA:${t}]]`;
   });
+  let derivada = '';
+  s = s.replace(RE_DERIVAR, (m, destino) => {
+    const d = String(destino || '').trim().toLowerCase();
+    const p = DESTINO_DERIVAR[d] || d;
+    if (derivada || !deriv || p === deriv.plano || PLANOS_VALIDOS.indexOf(p) < 0) return '';
+    derivada = p;
+    const q = _txt(deriv.query).replace(/\s+/g, ' ').replace(/\|/g, '/').replace(/\]/g, ')').substring(0, 300);
+    return `[[IR:${p}|${ETIQUETA_DERIVAR[p]}|${q}]]`;
+  });
   return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -893,6 +978,9 @@ function _textoParaModelo(texto) {
   return String(texto || '')
     .replace(/\[\[BTN:[^|\]]*\|([^|\]]*)\|[^\]]*\]\]/g, '($1)')
     .replace(RE_BTN, '')
+    // v1.0.7 — la derivación, como su etiqueta: el modelo sabe que la ofreció.
+    .replace(/\[\[IR:[^|\]]*\|([^|\]]*)\|[^\]]*\]\]/g, '($1)')
+    .replace(RE_IR, '')
     .replace(RE_PREGUNTA, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -900,6 +988,12 @@ function _textoParaModelo(texto) {
 
 function _contarBotones(texto) {
   return (String(texto || '').match(RE_BTN) || []).length;
+}
+
+// v1.0.7 — a qué pestaña se derivó en esta respuesta ('' si a ninguna).
+function _derivadaA(texto) {
+  const m = String(texto || '').match(/\[\[IR:([a-z]+)\|/);
+  return m ? m[1] : '';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -953,7 +1047,8 @@ function _buildSystemBlocks(ctx) {
     stable.push(_identidadPorDefecto(plano, marca));
   }
 
-  stable.push(`PLANO ACTIVO: ${plano.toUpperCase()}.`);
+  // v1.0.7 — con el nombre de la pestaña: "MERCADO" ya no dice lo que es.
+  stable.push(`PESTAÑA ACTIVA: ${(NOMBRE_PLANO[plano] || plano).toUpperCase()}.`);
 
   // ── TONO Y NIVEL DE DETALLE ──
   if (config) {
@@ -1026,6 +1121,9 @@ function _buildSystemBlocks(ctx) {
     '4. Las INSTRUCCIONES DE CENTRIMERCA y la nota que acompaña al',
     '   conocimiento mandan sobre lo anterior donde sean más concretas.'
   ].join('\n'));
+
+  // ── v1.0.7 — PESTAÑAS Y DERIVACIÓN (siempre) ──
+  stable.push(_bloquePestanas(plano));
 
   // ── v1.0.5 — DATOS Y ACCIONES (solo si el plano tiene selección) ──
   if (hayDatos) stable.push(_bloqueDatos(fuentes));
@@ -1564,11 +1662,13 @@ export async function askCentriCore({ sessionId, query, userId, userName, modo }
     const { modeloUsado, degradado, timeMs: apiMs, cacheStats } = r;
 
     // v1.0.5 — marcadores → botones con el dato real (o fuera, si no valen).
-    const respuesta = _resolverMarcadores(r.respuesta, reg, fuentes.preguntas);
+    // v1.0.7 — y la derivación a la otra pestaña, con la pregunta del usuario.
+    const respuesta = _resolverMarcadores(r.respuesta, reg, fuentes.preguntas, { plano, query: String(query) });
     const datos = {
       fuentes: fuentes.colecciones.map(c => c.id),
       consultas: r.consultas || 0,
-      botones: _contarBotones(respuesta)
+      botones: _contarBotones(respuesta),
+      derivada: _derivadaA(respuesta)
     };
 
     let effectiveSessionId;
@@ -1588,7 +1688,7 @@ export async function askCentriCore({ sessionId, query, userId, userName, modo }
     const totalMs = Date.now() - tIn;
     _log({ query, respuesta, plano, modeloUsado, degradado, prepMs, apiMs, totalMs, cacheStats, corpusChars, corpusTruncado, datos });
 
-    console.log(`${TAG} askCentriCore OUT total=${totalMs}ms (prep=${prepMs}ms api=${apiMs}ms) modelo=${modeloUsado}${degradado ? ' ⚠️DEGRADADO' : ''} cache=${cacheStats.hit}/${cacheStats.create} len=${respuesta.length} consultas=${datos.consultas} botones=${datos.botones}`);
+    console.log(`${TAG} askCentriCore OUT total=${totalMs}ms (prep=${prepMs}ms api=${apiMs}ms) modelo=${modeloUsado}${degradado ? ' ⚠️DEGRADADO' : ''} cache=${cacheStats.hit}/${cacheStats.create} len=${respuesta.length} consultas=${datos.consultas} botones=${datos.botones} derivada=${datos.derivada || '-'}`);
 
     return { ok: true, respuesta, sessionId: effectiveSessionId };
 
@@ -1761,7 +1861,10 @@ export const centriAbrirChat = webMethod(
       const guardado = (prop.sesion && prop.sesion.modo)
         ? String(prop.sesion.modo).trim().toLowerCase()
         : '';
-      const modo = PLANOS_VALIDOS.indexOf(guardado) >= 0 ? guardado : null;
+      // v1.0.7 — una sesión de producto, trabajar o dudas vuelve a la pestaña
+      // Centrimerca. Vacío sigue siendo null: el front no toca la pestaña.
+      const leido = ALIAS_PLANO[guardado] || guardado;
+      const modo = PLANOS_VALIDOS.indexOf(leido) >= 0 ? leido : null;
 
       console.log(`${TAG} centriAbrirChat OUT ${mensajes.length} mensajes modo=${modo || 'sin guardar'}`);
       return { ok: true, sessionId, mensajes, modo };
@@ -1842,6 +1945,16 @@ export const centriBorrarChat = webMethod(
  *     botones salieron en la respuesta.
  *   · "fuentes BLOQUEADAS descartadas" → alguien marcó a mano una colección
  *     prohibida en el CMS; no se ha leído.
+ *
+ *   v1.0.7:
+ *   · PREP ... plano=centri|mercado. Ningún otro valor es posible.
+ *   · align=v<n> en centri antes de publicar su primera versión → es el
+ *     alignment de producto que aún sigue publicado (alias). Al publicar
+ *     centri en el Entrenador se archiva y pasa a ser el de centri.
+ *   · docs= que no cuadre → algún documento sin plano se fue a la
+ *     Enciclopedia (plano por defecto).
+ *   · OUT ... derivada=centri|mercado → la respuesta ofreció el botón para
+ *     hacer la pregunta en la otra pestaña. derivada=- → no lo ofreció.
  *
  * Y el circuito del 504, en la consola del navegador:
  *
