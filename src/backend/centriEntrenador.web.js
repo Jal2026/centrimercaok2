@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI · Entrenador (backend)
  * Archivo:  backend/centriEntrenador.web.js
- * VERSION:  1.0.2
- * FECHA:    09 Octubre 2026
+ * VERSION:  1.0.3
+ * FECHA:    10 Octubre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
  * PROCEDENCIA
@@ -114,6 +114,13 @@
  *   · Si hay más de una fila para un plano (la suya y la de un plano
  *     antiguo), manda la guardada con ese plano tal cual.
  *   · META_POR_PLANO: un molde por pestaña.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * v1.0.3 — 10 OCT 2026 · TEXTO PROPIO DE CADA BOTÓN
+ * ───────────────────────────────────────────────────────────────────────────
+ *   · _fuentesParaGuardar conserva `etiqueta` en cada acción (máx. 60). La
+ *     usa centriLogic v1.0.8. Sin esto, guardar desde el widget borraría el
+ *     texto de los botones de CentriConfig («Hazte cliente», «Tutorial…»).
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -127,7 +134,7 @@ import { currentMember } from 'wix-members-backend';
 import { elevate } from 'wix-auth';
 import { collections } from 'wix-data.v2';
 
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const TAG = `[CentriEntrenador][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -283,9 +290,15 @@ function _fuentesParaGuardar(raw) {
     const campos = (Array.isArray(c.campos) ? c.campos : [])
       .filter(x => x && x.key)
       .map(x => ({ key: String(x.key), tipo: String(x.tipo || '').toUpperCase() }));
+    // v1.0.3 — `etiqueta`: texto propio del botón. Vacía = el de siempre.
     const acciones = (Array.isArray(c.acciones) ? c.acciones : [])
       .filter(x => x && x.key && ACCIONES_VALIDAS.indexOf(x.accion) >= 0)
-      .map(x => ({ key: String(x.key), accion: x.accion }));
+      .map(x => {
+        const a = { key: String(x.key), accion: x.accion };
+        const etiqueta = String(x.etiqueta || '').trim().substring(0, 60);
+        if (etiqueta) a.etiqueta = etiqueta;
+        return a;
+      });
     colecciones.push({
       id: String(c.id),
       nombre: String(c.nombre || c.id),
