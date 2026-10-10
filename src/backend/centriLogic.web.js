@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI · Backend
  * Archivo:  backend/centriLogic.web.js
- * VERSION:  1.0.8
+ * VERSION:  1.0.9
  * FECHA:    10 Octubre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
@@ -310,6 +310,22 @@
  * 4. TELÉFONOS. Llamar y WhatsApp usan el criterio de Equipo.rcgzm.js (page
  *    code de Equipo, Jal 08/10): solo dígitos, «0034…» → «34…», nueve
  *    dígitos → «34» delante. wa.me no funciona sin prefijo de país.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * v1.0.9 — 10 OCT 2026 · LA FICHA NO SALÍA CON «PERA» NI CON «KIWIS»
+ * ───────────────────────────────────────────────────────────────────────────
+ * Detectado por Jal: «¿Qué peras tenéis?» respondía sin el botón Ver ficha.
+ * No era la consola: la herramienta no le daba el botón al modelo.
+ *   · La búsqueda era SUBCADENA en toda la fila. «pera» está dentro de
+ *     «temperatura», que aparece en la conservación de 40 productos: 40
+ *     filas, por encima del tope, y la herramienta devolvía solo el índice de
+ *     nombres, SIN botones. Con «kiwis» no casaba nada y devolvía el catálogo
+ *     entero, también como índice. Medido con el catálogo real (77 productos).
+ *   · Ahora se busca por PALABRAS y primero en el nombre, admitiendo plural
+ *     (_filtrarPorBusqueda). El criterio anterior queda como último recurso.
+ *   · Y el índice, cuando hay que usarlo, lleva los botones de cada fila
+ *     (_accionesDeFila): aunque la consulta sea amplia, CENTRI puede ofrecer
+ *     la ficha del producto del que habla.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -318,7 +334,7 @@ import { fetch } from 'wix-fetch';
 import wixData from 'wix-data';
 import { getSecret } from 'wix-secrets-backend';
 
-const VERSION = '1.0.8';
+const VERSION = '1.0.9';
 const TAG = `[CentriLogic][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -828,6 +844,75 @@ function _registrarAccion(reg, tipo, etiqueta, href) {
  *   · Búsqueda: copia del criterio de consultarConfig (AKIRA): sin acentos y,
  *     si parece un teléfono, por dígitos. Sin coincidencias se devuelve todo.
  */
+/*
+ * v1.0.9 — Botones de una fila, con el dato real del CMS. Extraído tal cual
+ * del bucle de _consultarDatos (v1.0.8) para usarlo también en el índice.
+ */
+function _accionesDeFila(def, item, reg) {
+  const nombre = _txt(def.principal ? item[def.principal] : '');
+  const acciones = [];
+  for (const a of def.acciones) {
+    const tipo = TIPOS_ACCION[a.accion];
+    const href = tipo.href(item[a.key]);
+    if (!href) continue;
+    // v1.0.8 — con texto propio, el modelo lo recibe para saber cuál es cuál.
+    const etiqueta = a.etiqueta || tipo.etiqueta(nombre);
+    const accion = { id: _registrarAccion(reg, a.accion, etiqueta, href), tipo: a.accion };
+    if (a.etiqueta) accion.etiqueta = a.etiqueta;
+    acciones.push(accion);
+  }
+  return acciones;
+}
+
+/*
+ * v1.0.9 — Búsqueda por PALABRAS, empezando por el nombre. Ver cabecera.
+ * Se queda con el primer paso que encuentra algo:
+ *   1. Todas las palabras buscadas en el CAMPO PRINCIPAL, admitiendo plural
+ *      («peras» → «pera», «limones» → «limon»).
+ *   2. Las mismas palabras en el resto de la fila («Dirección Comercial»).
+ *   3. Criterio de v1.0.5: subcadena en toda la fila y teléfono por dígitos.
+ *   Sin nada → todas las filas, como antes.
+ * Las palabras de dos letras o menos («de», «la») no cuentan. Sin acentos.
+ */
+function _filtrarPorBusqueda(filas, busqueda, principal) {
+  const norm = (s) => String(s || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const palabras = (s) => norm(s).split(/[^a-z0-9]+/).filter(w => w.length > 2);
+  const variantes = (w) => {
+    const v = [w];
+    if (w.length > 3 && w.endsWith('s')) v.push(w.slice(0, -1));
+    if (w.length > 4 && w.endsWith('es')) v.push(w.slice(0, -2));
+    return v;
+  };
+  const buscadas = palabras(busqueda);
+  const casan = (texto) => {
+    if (buscadas.length === 0) return false;
+    const enTexto = new Set(palabras(texto));
+    return buscadas.every(w => variantes(w).some(x => enTexto.has(x)));
+  };
+  const textoFila = (datos) => Object.keys(datos)
+    .map(k => (typeof datos[k] === 'string' ? datos[k] : JSON.stringify(datos[k])))
+    .join(' ');
+
+  if (principal) {
+    const enNombre = filas.filter(f => casan(f.datos[principal]));
+    if (enNombre.length > 0) return enNombre;
+  }
+  const enFila = filas.filter(f => casan(textoFila(f.datos)));
+  if (enFila.length > 0) return enFila;
+
+  const aguja = norm(busqueda).trim();
+  const soloDigitos = aguja.replace(/[^\d]/g, '');
+  const esTelefono = soloDigitos.length >= 6;
+  const coinciden = filas.filter(f => {
+    const blob = norm(JSON.stringify(f.datos));
+    if (aguja && blob.indexOf(aguja) !== -1) return true;
+    if (esTelefono && blob.replace(/[^\d]/g, '').indexOf(soloDigitos) !== -1) return true;
+    return false;
+  });
+  return coinciden.length > 0 ? coinciden : filas;
+}
+
 async function _consultarDatos(input, fuentes, reg) {
   const p = input || {};
   const def = fuentes.colecciones.find(c => c.id === p.fuente);
@@ -858,19 +943,9 @@ async function _consultarDatos(input, fuentes, reg) {
     return { item, datos };
   });
 
+  // v1.0.9 — por palabras y primero en el nombre (ver _filtrarPorBusqueda).
   if (p.busqueda) {
-    const norm = (s) => String(s || '').toLowerCase()
-      .normalize('NFD').replace(/[̀-ͯ]/g, '');
-    const aguja = norm(p.busqueda).trim();
-    const soloDigitos = aguja.replace(/[^\d]/g, '');
-    const esTelefono = soloDigitos.length >= 6;
-    const coinciden = filas.filter(f => {
-      const blob = norm(JSON.stringify(f.datos));
-      if (aguja && blob.indexOf(aguja) !== -1) return true;
-      if (esTelefono && blob.replace(/[^\d]/g, '').indexOf(soloDigitos) !== -1) return true;
-      return false;
-    });
-    if (coinciden.length > 0) filas = coinciden;
+    filas = _filtrarPorBusqueda(filas, p.busqueda, def.principal);
   }
 
   // Demasiado grande para devolverla entera: índice de nombres y que acote.
@@ -880,11 +955,22 @@ async function _consultarDatos(input, fuentes, reg) {
   if (tamano > MAX_CHARS_RESULTADO) {
     if (def.principal) {
       console.log(`${TAG} consultar_datos fuente=${def.id} busqueda="${p.busqueda || ''}" → ${filas.length} filas, ${tamano} chars: SOLO ÍNDICE (${Date.now() - t0}ms)`);
+      // v1.0.9 — si la colección tiene botones, cada nombre va con los suyos.
+      const indice = filas.map(f => {
+        const nombre = f.datos[def.principal];
+        if (!nombre) return null;
+        if (def.acciones.length === 0) return nombre;
+        const fila = {};
+        fila[def.principal] = nombre;
+        const acciones = _accionesDeFila(def, f.item, reg);
+        if (acciones.length > 0) fila.acciones = acciones;
+        return fila;
+      }).filter(Boolean);
       return {
         fuente: def.id,
         total: filas.length,
         aviso: 'Hay demasiados datos para devolverlos todos. Vuelve a consultar con `busqueda` (por ejemplo, uno de estos nombres).',
-        indice: filas.map(f => f.datos[def.principal]).filter(Boolean)
+        indice
       };
     }
     let acumulado = 2;
@@ -901,18 +987,7 @@ async function _consultarDatos(input, fuentes, reg) {
 
   const salida = filas.map(f => {
     const fila = Object.assign({}, f.datos);
-    const nombre = _txt(def.principal ? f.item[def.principal] : '');
-    const acciones = [];
-    for (const a of def.acciones) {
-      const tipo = TIPOS_ACCION[a.accion];
-      const href = tipo.href(f.item[a.key]);
-      if (!href) continue;
-      // v1.0.8 — con texto propio, el modelo lo recibe para saber cuál es cuál.
-      const etiqueta = a.etiqueta || tipo.etiqueta(nombre);
-      const accion = { id: _registrarAccion(reg, a.accion, etiqueta, href), tipo: a.accion };
-      if (a.etiqueta) accion.etiqueta = a.etiqueta;
-      acciones.push(accion);
-    }
+    const acciones = _accionesDeFila(def, f.item, reg);   // v1.0.9: helper
     if (acciones.length > 0) fila.acciones = acciones;
     return fila;
   });
