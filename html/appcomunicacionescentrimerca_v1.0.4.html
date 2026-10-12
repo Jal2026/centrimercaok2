@@ -1,0 +1,1594 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>CENTRIMERCA · Comunicaciones</title>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     CENTRIMERCA — Comunicaciones · v1.0.4 · 5 Oct 2026
+     Interfaz del gestor de comunicaciones. Esta versión cubre EMAIL
+     (campañas vía Brevo). WhatsApp se portará desde KAMISUITE
+     (Comunicaciones v1.6.0, en producción) cuando Meta habilite la cuenta.
+
+     v1.0.1: el borrador se recupera. initComunicaciones trae `borrador`
+             (último sin enviar, guardado en CentriCampanias por el backend)
+             y, si el formulario está vacío, se rellena tal cual se dejó.
+             Botón «Empezar de cero» → descartarBorrador.
+     v1.0.2: en Seguimiento, «Duplicar como nueva campaña» carga en el
+             formulario los datos de cualquier campaña hecha con el gestor
+             (enviada, programada o borrador) como campaña NUEVA (sin
+             campaignId). Las campañas llegan con `datos` desde el backend.
+     v1.0.3: la vista previa crea un iframe NUEVO en cada pintado (reutilizar
+             el mismo y cambiar srcdoc no siempre repintaba al volver de
+             Seguimiento o al duplicar). Botón «Actualizar vista previa».
+             Al duplicar se cambia de pestaña antes de pintar.
+     v1.0.4: solo CSS — chip «Enviada» en verde sólido, «Borrador» en
+             naranja claro.
+     REQUIERE: centriComunicaciones.web.js v1.0.2 + Comunicaciones.page.js v1.0.1
+     ELEMENTO: #htmlComunicacionesCentri (HtmlComponent) ← confirmar al montar
+
+     ⚠️ ES UN IFRAME. Habla por postMessage. Patrón idéntico al Editor de
+        actualidad: page code = puente puro, backend con _exigirAdmin().
+     ⚠️ EL ACCESO NO LO DECIDE ESTE ARCHIVO, lo decide el backend.
+
+     DISEÑO: sistema de los editores de Centrimerca (Editor de actualidad
+     v1.0.3 / Editor de catálogo): Bai Jamjuree, secciones .sec, toasts.
+
+     MODO DEMOSTRACIÓN: si el archivo se abre suelto en el navegador (sin
+     página Wix alrededor), carga datos de ejemplo para poder revisar la
+     interfaz. Dentro de Wix NO se activa nunca.
+
+     ── CONTRATO PROPUESTO ───────────────────────────────────────────────
+     Widget → Page
+       ready                                   (con reintento, cada 700 ms)
+       subirImagen    { clave, base64Data, fileName, mimeType }
+       getGaleria     {}
+       guardarBorrador{ campania }
+       enviarPrueba   { campania, emails:[…] }
+       enviarCampania { campania }
+       getCampanias   {}
+       descartarBorrador { campaignId }                       (v1.0.1)
+       resize         { height }
+
+     Page → Widget   (todas con { type, payload })
+       initComunicaciones { ok, config:{ remitente:{nombre,email,replyTo} },
+                            plantillas:[{ id, nombre, descripcion, html,
+                                          campos?:[{clave,etiqueta,tipo,defecto,ayuda,ancho?}] }],
+                            listas:[{ id, nombre, contactos }],
+                            borrador?: { campaignId, plantillaId, nombre, asunto,
+                                         preheader, valores:{…}, listas:[ids] } }
+       imagenSubida       { ok, clave, publicUrl }
+       galeria            { ok, imagenes:[{ url, nombre }] }
+       borradorGuardado   { ok, campaignId }
+       pruebaEnviada      { ok, campaignId, emails }
+       campaniaEnviada    { ok, campaignId, programada, fecha }
+       campanias          { ok, campanias:[{ id, nombre, asunto, estado,
+                            fecha, destinatarios, entregados, aperturas,
+                            clics, bajas, rebotes, datos? }] }   (datos: v1.0.2)
+       borradorDescartado { ok, campaignId }                    (v1.0.1)
+       error              { ok:false, error }
+
+     campania = { campaignId, plantillaId, nombre, asunto, preheader,
+                  valores:{…}, html, listas:[ids], modo:'ahora'|'programada',
+                  fecha (ISO o '') }
+     `html` sale ya compilado del widget (marcadores ${…} sustituidos). Los
+     marcadores de Brevo {{ … }} (baja, versión web) se dejan intactos.
+
+     ── PLANTILLAS ───────────────────────────────────────────────────────
+     Marcadores ${clave} en el HTML. Si la plantilla trae `campos`, se usan
+     sus etiquetas, tipos y valores por defecto; si no, los campos se
+     deducen de los marcadores. ${preheader} es reservado: lo rellena el
+     campo «Texto de vista previa» del paso 2.
+     tipo: texto · parrafo · url · imagen
+     En los campos de párrafo, **texto** se convierte en negrita y los
+     saltos de línea en <br>. Todo lo demás se escapa (no admite HTML).
+     ═══════════════════════════════════════════════════════════════════════ -->
+
+<link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f2f5f4;--panel:#fff;--panel2:#f7faf9;--panel3:#e9efee;
+  --line:#dde6e5;--line2:#cbd8d7;--line3:#b6c7c6;
+  --fg:#12201f;--fg2:#3a4b49;--muted:#6b7a78;--muted2:#9aa8a6;
+  --accent:#006166;--accent2:#00494d;
+  --accent-dim:rgba(0,97,102,.06);--accent-light:rgba(0,97,102,.14);
+  --hi:#b8632a;--hi-dim:rgba(184,99,42,.08);--hi-light:rgba(184,99,42,.16);
+  --star:#E80A4D;--star-dim:rgba(232,10,77,.07);--star-light:rgba(232,10,77,.18);
+  --green:#2b7a4b;--red:#c0504d;--amber:#a8790f;
+  --font:'Bai Jamjuree',sans-serif;--shadow:0 1px 4px rgba(0,0,0,.06);--r:8px
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:13px;line-height:1.5}
+.shell{display:flex;flex-direction:column;min-height:100vh}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.hd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel);border-top:3px solid var(--accent);flex-wrap:wrap}
+.hd-title{font-size:15px;font-weight:700;color:var(--accent)}
+.hd-sep{color:var(--muted2)}.hd-sub{font-size:12px;color:var(--fg2)}
+.hd-demo{margin-left:auto;font-size:11px;font-weight:600;color:var(--hi);background:var(--hi-dim);border:1px solid var(--hi-light);border-radius:20px;padding:3px 10px;display:none}
+
+.status-bar{display:flex;gap:14px;padding:7px 16px;background:var(--accent-dim);border-bottom:1px solid var(--accent-light);font-size:11px;color:var(--accent);flex-wrap:wrap}
+.sb-item{display:flex;align-items:center;gap:5px}
+.sb-dot{width:5px;height:5px;border-radius:50%;background:var(--hi);opacity:.9}
+
+/* ── Pestañas ─────────────────────────────────────────────────────────── */
+.tabs{display:flex;gap:2px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto}
+.tab{appearance:none;background:none;border:none;border-bottom:2px solid transparent;padding:11px 14px 9px;font-family:var(--font);font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;white-space:nowrap}
+.tab:hover{color:var(--fg2)}
+.tab.on{color:var(--accent);border-bottom-color:var(--accent)}
+.tab .tab-note{font-weight:400;font-size:11px;color:var(--muted2);margin-left:5px}
+.panel{display:none}.panel.on{display:block}
+
+.body{flex:1;padding:16px;display:flex;flex-direction:column;gap:14px}
+.split{display:grid;grid-template-columns:minmax(340px,1fr) minmax(420px,1.05fr);gap:14px;align-items:start}
+@media (max-width:1050px){.split{grid-template-columns:1fr}}
+.split>*{min-width:0}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+@media (max-width:620px){
+  .body{padding:10px;gap:10px}
+  .sec{padding:11px}
+  .hd,.tabs{padding-left:11px;padding-right:11px}
+  .status-bar{padding:7px 11px;gap:9px}
+  .ft{padding:10px 11px}
+}
+
+.sec{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;box-shadow:var(--shadow)}
+.sec h3{font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.8px;margin:0 0 4px;display:flex;align-items:center;gap:8px}
+.sec .hint{font-size:11px;color:var(--muted);margin:0 0 10px;line-height:1.45}
+.step-n{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;letter-spacing:0}
+.sec.done .step-n{background:var(--green)}
+.borrador-aviso{display:none;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding:9px 11px;border:1px solid var(--accent-light);border-radius:var(--r);background:var(--accent-dim);font-size:12px;color:var(--accent)}
+.borrador-aviso.on{display:flex}
+.borrador-aviso .spacer{flex:1}
+
+textarea,select,input[type="text"],input[type="email"],input[type="url"],input[type="datetime-local"]{width:100%;min-width:0;max-width:100%;background:var(--panel2);color:var(--fg);border:1px solid var(--line2);border-radius:var(--r);padding:9px 11px;font-family:var(--font);font-size:13px;outline:none;resize:vertical;transition:border-color .2s}
+textarea:focus,select:focus,input:focus{border-color:var(--accent)}
+textarea::placeholder,input::placeholder{color:var(--muted2)}
+.fld{margin-bottom:14px;min-width:0}
+.fld:last-child{margin-bottom:0}
+.fld label{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.4px}
+.fld label .cnt{text-transform:none;letter-spacing:0;color:var(--muted2)}
+.fld label .cnt.warn{color:var(--amber)}
+.fld .ayuda{font-size:11px;color:var(--muted2);margin-top:4px}
+.fld-asunto input{font-size:16px;font-weight:600;padding:11px 13px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row2>*{min-width:0}
+@media (max-width:620px){.row2{grid-template-columns:1fr}}
+.grupo{border-top:1px solid var(--line);margin-top:4px;padding-top:12px}
+.campos-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+.campos-grid>.fld{margin-bottom:12px}
+.campos-grid>.ancho{grid-column:1/-1}
+@media (max-width:620px){.campos-grid{grid-template-columns:1fr}}
+#sPrev{position:sticky;top:12px}
+@media (max-width:1050px){#sPrev{position:static}}
+.grupo-t{font-size:11.5px;font-weight:600;color:var(--fg2);margin-bottom:8px}
+.spacer{flex:1}
+
+/* ── Remitente ────────────────────────────────────────────────────────── */
+.remit{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12.5px;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px}
+.remit dt{color:var(--muted)}.remit dd{color:var(--fg);font-weight:500;word-break:break-all}
+
+/* ── Imagen de campo ──────────────────────────────────────────────────── */
+.imgfld{display:flex;gap:10px;align-items:flex-start}
+.imgfld .thumb{width:96px;height:64px;flex:none;border:1px dashed var(--line3);border-radius:6px;background:var(--panel3);object-fit:cover;display:flex;align-items:center;justify-content:center;color:var(--muted2);font-size:11px;overflow:hidden}
+.imgfld .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.imgfld .imgctl{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.imgfld .imgbtns{display:flex;gap:6px;flex-wrap:wrap}
+
+/* ── Listas de destinatarios ──────────────────────────────────────────── */
+.listas{display:flex;flex-direction:column;gap:6px}
+.lista{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel2);cursor:pointer}
+.lista:hover{border-color:var(--line3)}
+.lista.on{border-color:var(--accent-light);background:var(--accent-dim)}
+.lista input{width:18px;height:18px;flex:none;accent-color:var(--accent);cursor:pointer}
+.lista .ln{flex:1;min-width:0;font-size:13.5px;color:var(--fg);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lista .lc{font-size:12px;color:var(--muted);flex:none}
+.total{display:flex;align-items:baseline;gap:6px;margin-top:10px;font-size:12px;color:var(--muted)}
+.total b{font-size:20px;color:var(--fg);font-weight:700}
+
+/* ── Prueba y envío ───────────────────────────────────────────────────── */
+.inline{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
+.inline>input{flex:1;min-width:200px}
+.estado-prueba{margin-top:8px;font-size:12px;padding:8px 11px;border-radius:var(--r);border:1px solid var(--line);background:var(--panel2);color:var(--muted)}
+.estado-prueba.ok{border-color:rgba(43,122,75,.25);background:rgba(43,122,75,.06);color:var(--green)}
+.estado-prueba.caduca{border-color:var(--hi-light);background:var(--hi-dim);color:var(--hi)}
+.modos{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.modo{display:flex;align-items:flex-start;gap:9px;padding:11px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel2);cursor:pointer}
+.modo.on{border-color:var(--accent-light);background:var(--accent-dim)}
+.modo input{margin-top:2px;accent-color:var(--accent)}
+.modo b{display:block;font-size:13px;color:var(--fg);font-weight:600}
+.modo small{display:block;font-size:11px;color:var(--muted)}
+.pendientes{list-style:none;margin:10px 0 0;font-size:12px;color:var(--muted)}
+.pendientes li{padding:2px 0 2px 16px;position:relative}
+.pendientes li:before{content:'';position:absolute;left:3px;top:9px;width:6px;height:6px;border-radius:50%;background:var(--line3)}
+
+.btn{padding:11px 18px;border:1px solid var(--accent);border-radius:var(--r);background:var(--accent);color:#fff;font-family:var(--font);font-size:14px;font-weight:600;cursor:pointer;transition:background .15s}
+.btn:hover:not(:disabled){background:var(--accent2)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn-2{background:var(--panel2);color:var(--fg2);border-color:var(--line2)}
+.btn-2:hover:not(:disabled){background:var(--panel3)}
+.btn-sm{padding:8px 13px;font-size:12.5px}
+.btn-star{background:var(--star);border-color:var(--star)}
+.btn-star:hover:not(:disabled){background:#c4083f}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+
+/* ── Vista previa ─────────────────────────────────────────────────────── */
+.prev-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:var(--r);overflow:hidden;margin-left:auto}
+.seg button{appearance:none;border:none;background:var(--panel2);padding:6px 12px;font-family:var(--font);font-size:12px;color:var(--fg2);cursor:pointer}
+.seg button.on{background:var(--accent);color:#fff}
+.bandeja{border:1px solid var(--line);border-radius:var(--r) var(--r) 0 0;background:var(--panel2);padding:10px 13px;display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:12.5px}
+.bandeja .k{color:var(--muted)}
+.bandeja .v{color:var(--fg);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bandeja .v.asunto{font-weight:700}
+.bandeja .v.pre{color:var(--muted)}
+.lienzo{border:1px solid var(--line);border-top:none;border-radius:0 0 var(--r) var(--r);background:#EAF3EF;display:flex;justify-content:center;overflow:hidden}
+.lienzo iframe{border:none;width:100%;height:860px;background:#EAF3EF;display:block;transition:width .2s}
+.lienzo.movil iframe{width:375px;max-width:100%}
+.prev-vacia{padding:60px 20px;text-align:center;color:var(--muted);font-size:13px;width:100%}
+
+/* ── Seguimiento ──────────────────────────────────────────────────────── */
+.tabla-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r)}
+table.tabla{width:100%;border-collapse:collapse;font-size:12.5px;min-width:780px}
+.tabla th{text-align:left;font-weight:600;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;padding:9px 11px;background:var(--panel2);border-bottom:1px solid var(--line)}
+.tabla td{padding:10px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+.tabla tr:last-child td{border-bottom:none}
+.tabla tr.fila{cursor:pointer}
+.tabla tr.fila:hover td{background:var(--panel2)}
+.tabla tr.sel td{background:var(--accent-dim)}
+.tabla td.num,.tabla th.num{text-align:right;font-variant-numeric:tabular-nums}
+.tabla .c-nom{font-weight:600;color:var(--fg)}
+.tabla .c-asu{color:var(--muted);font-size:11.5px}
+.tabla .pct{color:var(--muted);font-size:11px;display:block}
+.badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.enviada{background:var(--green);color:#fff;border:1px solid var(--green)}
+.badge.programada{background:var(--hi-dim);color:var(--hi);border:1px solid var(--hi-light)}
+.badge.borrador{background:#FDEBD8;color:#A4561A;border:1px solid #F3CBA2}
+.badge.enviando{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent-light)}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:12px}
+@media (max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{border:1px solid var(--line);border-radius:var(--r);background:var(--panel2);padding:11px 12px}
+.kpi .kv{font-size:22px;font-weight:700;color:var(--fg);line-height:1.15;font-variant-numeric:tabular-nums}
+.kpi .kl{font-size:11px;color:var(--muted)}
+.kpi .kp{font-size:12px;color:var(--accent);font-weight:600}
+.vacio{padding:26px 16px;text-align:center;color:var(--muted);font-size:12.5px}
+
+.aviso{padding:13px 14px;border:1px solid var(--line);border-left:3px solid var(--hi);border-radius:var(--r);background:var(--panel);font-size:13px;color:var(--fg2);line-height:1.55}
+
+/* ── Modales ──────────────────────────────────────────────────────────── */
+/* Dentro de Wix el iframe crece hasta el alto del contenido y quien hace
+   scroll es la página: un position:fixed caería en lo alto del iframe, fuera
+   de la vista. Por eso el velo es absoluto y el modal se coloca a la altura
+   del botón que lo abrió (abrirOv). */
+.ov{display:none;position:absolute;left:0;top:0;right:0;min-height:100%;background:rgba(18,32,31,.45);z-index:50;align-items:flex-start;justify-content:center;padding:0 14px}
+.ov.on{display:flex}
+.modal{background:var(--panel);border-radius:var(--r);box-shadow:0 10px 40px rgba(0,0,0,.25);width:100%;max-width:520px;padding:18px}
+.modal h4{font-size:16px;font-weight:700;color:var(--fg);margin-bottom:12px}
+.resumen{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px;margin-bottom:14px}
+.resumen dt{color:var(--muted)}.resumen dd{color:var(--fg);font-weight:500;min-width:0;word-break:break-word}
+.modal .big{font-size:15px;color:var(--fg);margin-bottom:14px}
+.modal .big b{color:var(--star)}
+.modal-wide{max-width:760px}
+.galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;max-height:60vh;overflow-y:auto}
+.galeria button{appearance:none;border:1px solid var(--line);border-radius:6px;background:var(--panel3);padding:0;cursor:pointer;overflow:hidden;aspect-ratio:3/2}
+.galeria button:hover{border-color:var(--accent)}
+.galeria img{width:100%;height:100%;object-fit:cover;display:block}
+
+.ft{padding:10px 16px;border-top:1px solid var(--line);background:var(--panel);font-size:11px;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap}
+#toast{display:none;position:absolute;top:16px;left:50%;transform:translateX(-50%);background:var(--fg);color:#fff;padding:9px 16px;border-radius:var(--r);font-size:12.5px;z-index:99;box-shadow:0 4px 14px rgba(0,0,0,.2);max-width:90vw}
+.gate{display:none;margin:16px;padding:14px;border:1px solid var(--red);border-radius:var(--r);background:rgba(192,80,77,.06);color:var(--red);font-size:13px;line-height:1.55}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <div class="hd">
+    <span class="hd-title">CENTRIMERCA</span>
+    <span class="hd-sep">·</span>
+    <span class="hd-sub">Comunicaciones</span>
+    <span class="hd-demo" id="hdDemo">Modo demostración: datos de ejemplo</span>
+  </div>
+
+  <div class="status-bar">
+    <span class="sb-item"><span class="sb-dot"></span><span id="sbEstado">Cargando…</span></span>
+    <span class="sb-item"><span class="sb-dot"></span><span id="sbRemit">Remitente —</span></span>
+    <span class="sb-item"><span class="sb-dot"></span><span id="sbListas">— listas</span></span>
+    <span class="sb-item"><span class="sb-dot"></span><span id="sbContactos">— contactos</span></span>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab on" data-tab="email" role="tab">Nueva campaña de email</button>
+    <button class="tab" data-tab="seguimiento" role="tab">Seguimiento</button>
+    <button class="tab" data-tab="whatsapp" role="tab">WhatsApp<span class="tab-note">pendiente</span></button>
+  </div>
+
+  <div class="gate" id="gate"></div>
+
+  <div class="body" id="mainBody">
+
+    <!-- ═══ EMAIL ═══ -->
+    <div class="panel on" id="p-email">
+      <div class="split">
+
+        <div class="col">
+
+          <div class="sec" id="s1">
+            <h3><span class="step-n">1</span>Plantilla</h3>
+            <p class="hint">El diseño del correo. Las plantillas se gestionan en el CMS.</p>
+            <div class="fld">
+              <select id="selPlantilla" aria-label="Plantilla"></select>
+              <div class="ayuda" id="plantillaDesc"></div>
+            </div>
+            <div class="borrador-aviso" id="borradorAviso">
+              <span id="borradorTxt">Borrador guardado.</span>
+              <span class="spacer"></span>
+              <button class="btn btn-2 btn-sm" id="btnDescartar">Empezar de cero</button>
+            </div>
+          </div>
+
+          <div class="sec" id="s2">
+            <h3><span class="step-n">2</span>Contenido</h3>
+            <p class="hint">Lo que verá el cliente en la bandeja de entrada y dentro del correo.</p>
+            <div class="fld">
+              <label for="inNombre">Nombre interno de la campaña</label>
+              <input type="text" id="inNombre" placeholder="Ej.: Boletín octubre · Fruit Attraction">
+              <div class="ayuda">Solo lo ve el equipo, en Seguimiento y en Brevo.</div>
+            </div>
+            <div class="fld fld-asunto">
+              <label for="inAsunto">Asunto <span class="cnt" id="cntAsunto">0</span></label>
+              <input type="text" id="inAsunto" placeholder="Ej.: Te esperamos en Fruit Attraction 2026">
+            </div>
+            <div class="fld">
+              <label for="inPre">Texto de vista previa <span class="cnt" id="cntPre">0</span></label>
+              <input type="text" id="inPre" placeholder="La línea gris que acompaña al asunto en la bandeja">
+            </div>
+            <div id="camposPlantilla"></div>
+          </div>
+
+          <div class="sec" id="s3">
+            <h3><span class="step-n">3</span>Destinatarios</h3>
+            <p class="hint">Listas de contactos de Brevo. Las bajas y los rebotes los excluye Brevo automáticamente.</p>
+            <div class="listas" id="listas"></div>
+            <div class="total"><b id="totalDest">0</b><span>contactos seleccionados</span></div>
+          </div>
+
+          <div class="sec" id="s4">
+            <h3><span class="step-n">4</span>Prueba</h3>
+            <p class="hint">Envíate el correo antes de lanzarlo. Hace falta una prueba de la versión final para poder enviar la campaña.</p>
+            <div class="inline">
+              <input type="text" id="inPrueba" placeholder="tu@email.com, otro@email.com" aria-label="Direcciones de prueba">
+              <button class="btn btn-2" id="btnPrueba">Enviar prueba</button>
+            </div>
+            <div class="estado-prueba" id="estadoPrueba">Todavía no se ha enviado ninguna prueba.</div>
+          </div>
+
+          <div class="sec" id="s5">
+            <h3><span class="step-n">5</span>Envío</h3>
+            <dl class="remit" id="remit"></dl>
+            <div style="height:12px"></div>
+            <div class="modos">
+              <label class="modo on" id="modoAhora"><input type="radio" name="modo" value="ahora" checked><span><b>Enviar ahora</b><small>Sale en cuanto confirmes.</small></span></label>
+              <label class="modo" id="modoProg"><input type="radio" name="modo" value="programada"><span><b>Programar</b><small>Elige día y hora.</small></span></label>
+            </div>
+            <div class="fld" id="fldFecha" style="display:none">
+              <label for="inFecha">Día y hora de envío</label>
+              <input type="datetime-local" id="inFecha">
+            </div>
+            <ul class="pendientes" id="pendientes"></ul>
+            <div class="actions">
+              <button class="btn btn-2" id="btnBorrador">Guardar borrador</button>
+              <span class="spacer"></span>
+              <button class="btn btn-star" id="btnEnviar" disabled>Enviar campaña</button>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="sec" id="sPrev">
+          <div class="prev-head">
+            <h3 style="margin:0">Vista previa</h3>
+            <button class="btn btn-2 btn-sm" id="btnRefrescarPrev">Actualizar vista previa</button>
+            <div class="seg" role="group" aria-label="Tamaño de la vista previa">
+              <button class="on" data-dev="escritorio">Escritorio</button>
+              <button data-dev="movil">Móvil</button>
+            </div>
+          </div>
+          <div class="bandeja">
+            <span class="k">De</span><span class="v" id="pvDe">—</span>
+            <span class="k">Asunto</span><span class="v asunto" id="pvAsunto">—</span>
+            <span class="k"></span><span class="v pre" id="pvPre"></span>
+          </div>
+          <div class="lienzo" id="lienzo">
+            <div class="prev-vacia" id="prevVacia">Elige una plantilla para ver el correo.</div>
+            <iframe id="prevFrame" title="Vista previa del correo" sandbox="" style="display:none"></iframe>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ═══ SEGUIMIENTO ═══ -->
+    <div class="panel" id="p-seguimiento">
+      <div class="col">
+        <div class="sec">
+          <h3>Campañas de email</h3>
+          <p class="hint">Datos de Brevo. Las aperturas son orientativas: algunos programas de correo las bloquean o las simulan; entregas, clics y bajas son fiables.</p>
+          <div class="actions" style="margin:0 0 10px">
+            <span class="hint" id="segCuenta" style="margin:0"></span>
+            <span class="spacer"></span>
+            <button class="btn btn-2 btn-sm" id="btnRefrescar">Actualizar</button>
+          </div>
+          <div class="tabla-wrap"><div id="tablaCamp"><div class="vacio">Cargando campañas…</div></div></div>
+        </div>
+        <div class="sec" id="detalle" style="display:none">
+          <h3 id="detTitulo">Campaña</h3>
+          <p class="hint" id="detSub"></p>
+          <div class="kpis" id="detKpis"></div>
+          <div class="actions" id="detAcciones" style="display:none">
+            <button class="btn btn-2 btn-sm" id="btnDuplicar">Duplicar como nueva campaña</button>
+            <span class="hint" id="detNota" style="margin:0"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ WHATSAPP ═══ -->
+    <div class="panel" id="p-whatsapp">
+      <div class="aviso">
+        Los envíos por WhatsApp se activarán cuando Meta habilite la cuenta de empresa de Centrimerca.
+        Usarán el mismo sistema que ya funciona en producción: plantillas aprobadas por Meta y destinatarios con consentimiento.
+      </div>
+    </div>
+
+  </div>
+
+  <div class="ft">
+    <span>Comunicaciones v1.0.4</span>
+    <span>Email vía Brevo</span>
+  </div>
+
+</div>
+
+<!-- Confirmación de envío -->
+<div class="ov" id="ovEnvio" role="dialog" aria-modal="true" aria-labelledby="ovEnvioT">
+  <div class="modal">
+    <h4 id="ovEnvioT">Confirmar envío</h4>
+    <p class="big" id="ovEnvioBig"></p>
+    <dl class="resumen" id="ovEnvioRes"></dl>
+    <div class="actions">
+      <button class="btn btn-2" id="btnCancelarEnvio">Cancelar</button>
+      <span class="spacer"></span>
+      <button class="btn btn-star" id="btnConfirmarEnvio">Enviar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Galería de imágenes -->
+<div class="ov" id="ovGaleria" role="dialog" aria-modal="true" aria-labelledby="ovGaleriaT">
+  <div class="modal modal-wide">
+    <div class="actions" style="margin:0 0 12px">
+      <h4 id="ovGaleriaT" style="margin:0">Imágenes del sitio</h4>
+      <span class="spacer"></span>
+      <button class="btn btn-2 btn-sm" id="btnCerrarGaleria">Cerrar</button>
+    </div>
+    <div class="galeria" id="galeria"><div class="vacio">Cargando imágenes…</div></div>
+  </div>
+</div>
+
+<input type="file" id="fileImg" accept="image/jpeg,image/png,image/gif" style="display:none">
+<div id="toast"></div>
+
+<script type="text/plain" id="demoPlantilla"><!DOCTYPE html>
+<html lang="es" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>Boletín de Noticias · Centrimerca</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@400;600&family=Questrial&display=swap" rel="stylesheet">
+<!--[if mso]>
+<noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
+<![endif]-->
+</head>
+<body style="margin:0; padding:0; width:100%; background-color:#EAF3EF; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%;">
+
+<span style="display:none; font-size:1px; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden; mso-hide:all; color:#EAF3EF;">${preheader} ͏ ͏ ͏ ͏</span>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#EAF3EF" style="background-color:#EAF3EF;">
+<tbody><tr>
+<td align="center" style="padding:24px 12px;">
+
+<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" align="center"><tr><td width="600"><![endif]-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:600px; margin:0 auto;">
+
+  <!-- Enlace versión web -->
+  <tbody><tr>
+    <td align="center" style="padding:0 0 14px 0; font-family:'Bai Jamjuree', Verdana, Tahoma, sans-serif; font-size:12px; line-height:18px; mso-line-height-rule:exactly; color:#3E5A4D;">
+      ¿No ves bien este correo? <a href="{{ mirror }}" style="color:#045333; text-decoration:underline;">Ábrelo en tu navegador</a>
+    </td>
+  </tr>
+
+  <!-- Cabecera -->
+  <tr>
+    <td align="center" bgcolor="#FFFFFE" style="background-color:#FFFFFE; padding:32px 24px 28px 24px; border-top:6px solid #09A072;">
+      <a href="https://centrimerca.es" style="text-decoration:none;">
+        <!-- SUSTITUIR src por la URL pública del logo (negro) -->
+        <img src="__LOGO_NEGRO__" width="220" alt="Centrimerca" style="display:block; width:220px; max-width:100%; height:auto; border:0; outline:none; text-decoration:none; font-family:Arial, sans-serif; font-size:24px; color:#045333;">
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td bgcolor="#FFFFFE" style="background-color:#FFFFFE; padding:0 32px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tbody><tr>
+          <td style="border-top:1px solid #CFE3DA; font-size:0; line-height:0;">&nbsp;</td>
+        </tr>
+      </tbody></table>
+    </td>
+  </tr>
+
+  <!-- Título principal -->
+  <tr>
+    <td bgcolor="#FFFFFE" style="background-color:#FFFFFE; padding:28px 32px 8px 32px;">
+      <p style="margin:0 0 10px 0; font-family:'Bai Jamjuree', Verdana, Tahoma, sans-serif; font-size:12px; line-height:16px; mso-line-height-rule:exactly; letter-spacing:1.5px; text-transform:uppercase; font-weight:600; color:#045333;">
+        <span style="color:#E50046;">●</span>&nbsp; ${cabecera}
+      </p>
+      <h1 style="margin:0; font-family:'Questrial', Arial, Helvetica, sans-serif; font-size:34px; line-height:40px; mso-line-height-rule:exactly; font-weight:normal; color:#1F2A25;">
+        ${titulo}
+      </h1>
+      <p style="margin:10px 0 0 0; font-family:'Bai Jamjuree', Verdana, Tahoma, sans-serif; font-size:15px; line-height:23px; mso-line-height-rule:exactly; color:#3E5A4D;">
+        ${entradilla}
+      </p>
+    </td>
+  </tr>
+
+  <!-- Imagen de la noticia -->
+  <tr>
+    <td bgcolor="#FFFFFE" style="background-color:#FFFFFE; padding:24px 32px 0 32px;">
+      <!-- SUSTITUIR src por la URL pública de la imagen -->
+      <img src="${imagen}" width="536" alt="${imagenAlt}" style="display:block; width:100%; max-width:536px; height:auto; border:0; outline:none; border-radius:0 40px 0 0; font-family:Arial, sans-serif; font-size:14px; color:#045333;">
+    </td>
+  </tr>
+
+  <!-- Bloque de noticia -->
+  <tr>
+    <td bgcolor="#FFFFFE" style="background-color:#FFFFFE; padding:28px 32px 8px 32px;">
+      <!-- Etiquetas -->
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px 0;">
+        <tbody><tr>
+          <td bgcolor="#E6F4EE" style="background-color:#E6F4EE; padding:5px 10px; border-radius:4px; font-family:'Bai Jamjuree', Verdana, Tahoma, sans-serif; font-size:11px; line-height:14px; letter-spacing:1px; text-transform:uppercase; font-weight:600; color:#045333;">${etiqueta1}</td>
+          <td width="8" style="width:8px; font-size:0; line-height:0;">&nbsp;</td>
+          <td bgcolor="#E6F4EE" style="background-color:#E6F4EE; padding:5px 10px; border-radius:4px; font-family:'Bai Jamjuree', Verdana, Tahoma, sans-serif; font-size:11px; line-height:14px; letter-spacing:1px; text-transform:uppercase; font-weight:600; color:#045333;">${etiqueta2}</td>
+        </tr>
+      </tbody></table>
+
+      <h2 style="margin:0 0 16px 0; font-family:'Questrial', Arial, Helvetica, sans-serif; font-size:24px; line-height:31px; mso-line-height-rule:exactly; font-weight:normal; color:#1F2A25;">
+        ${titular}
+      </h2>
+
+      <p style="margin:0 0 14px 0; font-family:'Bai Jamjuree', Verdana, Tahoma, sans-serif; font-size:15px; line-height:24px; mso-line-height-rule:exactly; color:#33443C;">
+        ${parrafo1}
+      </p>
+      <p style="margin:0 0 24px 0; font-family:'Bai Jamjuree', Verdana, Tahoma, sans-serif; font-size:15px; line-height:24px; mso-line-height-rule:exactly; color:#33443C;">
+        ${parrafo2}
+      </p>
+
+      <!-- Dato destacado -->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px 0;">
+        <tbody><tr>
+          <td bgcolor="#F2F8F5" style="background-color:#F2F8F5; padding:16px 18px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tbody><tr>
+                <td width="33%" valign="top" style="font-family:'Bai Jamjuree', Verdana, Tahoma, sans-serif; font-size:11px; line-height:15px; letter-spacing:1px; text-transform:uppercase; color:#3E5A4D;">${dato1Titulo}<br><span style="font-family:'Questrial', Arial, Helvetica, sans-serif; font-size:17px; line-height:24px; letter-spacing:0; text-transform:none; color:#045333;">${dato1Valor}</span></td>
+                <td width="33%" valign="top" style="font-family:'Bai Jamjuree', Verdana, Tahoma, sans-serif; font-size:11px; line-height:15px; letter-spacing:1px; text-transform:uppercase; color:#3E5A4D;">${dato2Titulo}<br><span style="font-family:'Questrial', Arial, Helvetica, sans-serif; font-size:17px; line-height:24px; letter-spacing:0; text-transform:none; color:#045333;">${dato2Valor}</span></td>
+                <td width="34%" valign="top" style="font-family:'Bai Jamjuree', Verdana, Tahoma, sans-serif; font-size:11px; line-height:15px; letter-spacing:1px; text-transform:uppercase; color:#3E5A4D;">${dato3Titulo}<br><span style="font-family:'Questrial', Arial, Helvetica, sans-serif; font-size:17px; line-height:24px; letter-spacing:0; text-transform:none; color:#045333;">${dato3Valor}</span></td>
+              </tr>
+            </tbody></table>
+          </td>
+        </tr>
+      </tbody></table>
+
+      <!-- CTA -->
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+        <tbody><tr>
+          <td align="left" bgcolor="#09A072" style="background-color:#09A072; border-radius:24px; mso-padding-alt:14px 28px;">
+            <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${botonUrl}" style="height:48px;v-text-anchor:middle;width:200px;" arcsize="50%" stroke="f" fillcolor="#09A072"><center style="color:#FFFFFE;font-family:Arial,sans-serif;font-size:15px;">${botonTexto}</center></v:roundrect><![endif]-->
+            <!--[if !mso]><!-- -->
+            <a href="${botonUrl}" target="_blank" style="display:block; padding:14px 28px; font-family:'Bai Jamjuree', Verdana, Tahoma, sans-serif; font-size:15px; line-height:20px; font-weight:600; color:#FFFFFE; text-decoration:none; border-radius:24px;">${botonTexto}</a>
+            <!--<![endif]-->
+          </td>
+        </tr>
+      </tbody></table>
+    </td>
+  </tr>
+  <tr>
+    <td bgcolor="#FFFFFE" height="40" style="background-color:#FFFFFE; height:40px; font-size:0; line-height:0;">&nbsp;</td>
+  </tr>
+
+  <!-- Pie -->
+  <tr>
+    <td bgcolor="#045333" style="background-color:#045333; padding:32px 32px 28px 32px;">
+      <a href="https://centrimerca.es" style="text-decoration:none;">
+        <!-- SUSTITUIR src por la URL pública del logo (blanco) -->
+        <img src="__LOGO_BLANCO__" width="160" alt="Centrimerca" style="display:block; width:160px; max-width:100%; height:auto; border:0; outline:none; font-family:Arial, sans-serif; font-size:18px; color:#FFFFFE;">
+      </a>
+      <p style="margin:20px 0 0 0; font-family:'Bai Jamjuree', Verdana, Tahoma, sans-serif; font-size:13px; line-height:21px; mso-line-height-rule:exactly; color:#D5E9E0;">
+        <strong style="color:#FFFFFE;">Centrimerca</strong><br>
+        Mercamadrid · [Dirección completa] · 28053 Madrid<br>
+        Tel. <a href="tel:+34910000000" style="color:#FFFFFE; text-decoration:none;">[+34 91 000 00 00]</a><br>
+        <a href="https://centrimerca.es" style="color:#FFFFFE; text-decoration:underline;">centrimerca.es</a>
+      </p>
+    </td>
+  </tr>
+  <tr>
+    <td bgcolor="#045333" style="background-color:#045333; padding:0 32px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tbody><tr><td style="border-top:1px solid #2C6E52; font-size:0; line-height:0;">&nbsp;</td></tr>
+      </tbody></table>
+    </td>
+  </tr>
+  <tr>
+    <td bgcolor="#045333" style="background-color:#045333; padding:16px 32px 28px 32px; font-family:'Bai Jamjuree', Verdana, Tahoma, sans-serif; font-size:12px; line-height:19px; mso-line-height-rule:exactly; color:#BFDCCF;">
+      Recibes este correo porque estás suscrito al Boletín de Noticias de Centrimerca.<br>
+      <a href="{{ unsubscribe }}" style="color:#FFFFFE; text-decoration:underline;">Darse de baja</a>
+    </td>
+  </tr>
+
+</tbody></table>
+<!--[if mso]></td></tr></table><![endif]-->
+
+</td>
+</tr>
+</tbody></table>
+
+
+</body></html></script>
+
+<script>
+/* ═════════════════════════════════════════════════════════════════════════
+ * ESTADO
+ * ═════════════════════════════════════════════════════════════════════════ */
+var V = 'Comunicaciones v1.0.4';
+var MAX_IMG = 3 * 1024 * 1024;     // 3 MB — igual que los editores de Centrimerca
+var LIM_ASUNTO = 60;               // a partir de aquí muchos móviles lo cortan
+var LIM_PRE = 110;
+
+var DEMO = (window.parent === window);
+
+var CFG = { remitente: { nombre: '', email: '', replyTo: '' } };
+var PLANTILLAS = [];
+var LISTAS = [];
+var CAMPANIAS = [];
+
+var draft = nuevoDraft();
+var firmaPrueba = '';          // firma del borrador en el momento de la última prueba
+var emailsPrueba = [];
+var horaPrueba = '';
+var imgClavePend = '';         // campo de imagen que espera la subida
+var campSel = '';
+var dispositivo = 'escritorio';
+var ocupado = false;
+
+var $ = function(id){ return document.getElementById(id); };
+
+function nuevoDraft(){
+  return { campaignId: '', plantillaId: '', nombre: '', asunto: '', preheader: '',
+           valores: {}, listas: [], modo: 'ahora', fecha: '' };
+}
+
+// El aviso sale cerca del último clic (mismo motivo que los modales: dentro
+// de Wix un aviso fijo abajo quedaría fuera de la vista).
+var ultimoY = 16;
+document.addEventListener('click', function(e){ ultimoY = e.pageY || ultimoY; }, true);
+
+function toast(msg, ms){
+  var t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  t.style.top = Math.max(16, ultimoY + 28) + 'px';
+  clearTimeout(toast._t);
+  toast._t = setTimeout(function(){ t.style.display = 'none'; }, ms || 2800);
+}
+
+function send(type, data){
+  var msg = Object.assign({ type: type }, data || {});
+  if (DEMO) { demoResponder(msg); return; }
+  try { parent.postMessage(msg, '*'); } catch (e) {}
+}
+
+function esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+  });
+}
+
+function fmtNum(n){ return (Number(n) || 0).toLocaleString('es-ES'); }
+function pct(a, b){ return b ? (Math.round(a / b * 1000) / 10).toLocaleString('es-ES') + ' %' : '—'; }
+function fmtFecha(iso){
+  if (!iso) return '—';
+  var d = new Date(iso); if (isNaN(d)) return esc(iso);
+  return d.toLocaleDateString('es-ES', { day:'2-digit', month:'short', year:'numeric' }) + ' · ' +
+         d.toLocaleTimeString('es-ES', { hour:'2-digit', minute:'2-digit' });
+}
+
+function plantillaActual(){
+  for (var i = 0; i < PLANTILLAS.length; i++) { if (PLANTILLAS[i].id === draft.plantillaId) return PLANTILLAS[i]; }
+  return null;
+}
+function listaPorId(id){
+  for (var i = 0; i < LISTAS.length; i++) { if (String(LISTAS[i].id) === String(id)) return LISTAS[i]; }
+  return null;
+}
+function totalDestinatarios(){
+  var t = 0;
+  draft.listas.forEach(function(id){ var l = listaPorId(id); if (l) t += Number(l.contactos) || 0; });
+  return t;
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * PLANTILLAS — campos y compilación
+ * ═════════════════════════════════════════════════════════════════════════ */
+var RESERVADOS = { preheader: 1 };
+
+function humanizar(clave){
+  var s = String(clave).replace(/([a-z])([A-Z0-9])/g, '$1 $2').replace(/[_-]+/g, ' ');
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+function tipoDeducido(clave){
+  var k = clave.toLowerCase();
+  if (/^(imagen|img|foto|logo)/.test(k) && !/alt$/.test(k)) return 'imagen';
+  if (/(url|enlace|link)$/.test(k) || /^(url|enlace)/.test(k)) return 'url';
+  if (/^(parrafo|texto|cuerpo|entradilla)/.test(k)) return 'parrafo';
+  return 'texto';
+}
+
+// Campos de la plantilla: los declarados (si los trae) o los deducidos de
+// los marcadores ${clave}, en el orden en que aparecen en el HTML.
+function camposDe(p){
+  if (!p) return [];
+  if (p.campos && p.campos.length) {
+    return p.campos.filter(function(c){ return c && c.clave && !RESERVADOS[c.clave]; });
+  }
+  var vistos = {}, out = [], re = /\$\{(\w+)\}/g, m;
+  while ((m = re.exec(p.html || ''))) {
+    var k = m[1];
+    if (vistos[k] || RESERVADOS[k]) continue;
+    vistos[k] = 1;
+    out.push({ clave: k, etiqueta: humanizar(k), tipo: tipoDeducido(k), defecto: '' });
+  }
+  return out;
+}
+
+function valorCompilado(campo, valor){
+  var v = valor == null ? '' : String(valor);
+  if (campo.tipo === 'url' || campo.tipo === 'imagen') return esc(v.trim());
+  if (campo.tipo === 'parrafo') {
+    return esc(v.trim())
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\r?\n/g, '<br>');
+  }
+  return esc(v);
+}
+
+// HTML final del correo. Los marcadores de Brevo {{ … }} no se tocan.
+function compilarHtml(){
+  var p = plantillaActual(); if (!p) return '';
+  var mapa = {};
+  camposDe(p).forEach(function(c){ mapa[c.clave] = c; });
+  return String(p.html || '').replace(/\$\{(\w+)\}/g, function(todo, k){
+    if (k === 'preheader') return esc(draft.preheader);
+    var c = mapa[k] || { clave: k, tipo: tipoDeducido(k) };
+    return valorCompilado(c, draft.valores[k]);
+  });
+}
+
+// Para la vista previa: los marcadores de Brevo no existen fuera de Brevo.
+function htmlVistaPrevia(){
+  // <base target="_blank">: dentro del sandbox los enlaces no navegan la vista previa.
+  return compilarHtml()
+    .replace(/\{\{\s*[^}]+\}\}/g, '#')
+    .replace(/<head([^>]*)>/i, '<head$1><base target="_blank">');
+}
+
+function camposVacios(){
+  var p = plantillaActual(); if (!p) return [];
+  return camposDe(p).filter(function(c){
+    return !String(draft.valores[c.clave] == null ? '' : draft.valores[c.clave]).trim();
+  });
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * FIRMA DEL BORRADOR — una prueba vale solo para la versión que se probó
+ * ═════════════════════════════════════════════════════════════════════════ */
+function firmaDraft(){
+  return JSON.stringify([draft.plantillaId, draft.asunto, draft.preheader, compilarHtml()]);
+}
+function pruebaVigente(){ return !!firmaPrueba && firmaPrueba === firmaDraft(); }
+
+function payloadCampania(){
+  return {
+    campaignId: draft.campaignId,
+    plantillaId: draft.plantillaId,
+    nombre: draft.nombre.trim(),
+    asunto: draft.asunto.trim(),
+    preheader: draft.preheader.trim(),
+    valores: JSON.parse(JSON.stringify(draft.valores)),
+    html: compilarHtml(),
+    listas: draft.listas.slice(),
+    modo: draft.modo,
+    fecha: draft.modo === 'programada' && draft.fecha ? new Date(draft.fecha).toISOString() : ''
+  };
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * RENDER — paso 1 a 5
+ * ═════════════════════════════════════════════════════════════════════════ */
+function renderStatus(){
+  var r = CFG.remitente || {};
+  $('sbRemit').textContent = r.email ? 'Remitente ' + r.email : 'Remitente sin configurar';
+  $('sbListas').textContent = LISTAS.length + (LISTAS.length === 1 ? ' lista' : ' listas');
+  var t = 0; LISTAS.forEach(function(l){ t += Number(l.contactos) || 0; });
+  $('sbContactos').textContent = fmtNum(t) + ' contactos en listas';
+}
+
+function renderPlantillas(){
+  var sel = $('selPlantilla');
+  var h = '<option value="">' + (PLANTILLAS.length ? 'Elige una plantilla…' : 'No hay plantillas en el CMS') + '</option>';
+  PLANTILLAS.forEach(function(p){
+    h += '<option value="' + esc(p.id) + '"' + (p.id === draft.plantillaId ? ' selected' : '') + '>' + esc(p.nombre) + '</option>';
+  });
+  sel.innerHTML = h;
+  var p = plantillaActual();
+  $('plantillaDesc').textContent = p && p.descripcion ? p.descripcion : '';
+  $('s1').classList.toggle('done', !!p);
+  renderAvisoBorrador();
+}
+
+// v1.0.1: aviso de borrador guardado + botón para empezar de cero.
+var descartarArmado = false;
+function renderAvisoBorrador(){
+  var hay = !!draft.campaignId;
+  $('borradorAviso').classList.toggle('on', hay);
+  if (!hay) { descartarArmado = false; return; }
+  $('borradorTxt').textContent = 'Borrador guardado' + (draft.nombre ? ': ' + draft.nombre : '') + '.';
+  $('btnDescartar').textContent = descartarArmado ? '¿Seguro? Pulsa otra vez' : 'Empezar de cero';
+}
+
+// v1.0.2: carga los datos de una campaña como campaña NUEVA (sin campaignId).
+var duplicarArmado = false;
+function campaniaSel(){
+  for (var i = 0; i < CAMPANIAS.length; i++) { if (CAMPANIAS[i].id === campSel) return CAMPANIAS[i]; }
+  return null;
+}
+function duplicarCampania(){
+  var c = campaniaSel();
+  if (!c || !c.datos || ocupado) return;
+  var hayAlgo = !!(draft.campaignId || draft.plantillaId || draft.asunto);
+  if (hayAlgo && !duplicarArmado) {
+    duplicarArmado = true;
+    $('btnDuplicar').textContent = '¿Seguro? Pulsa otra vez';
+    $('detNota').textContent = 'Se sustituirá lo que hay ahora en Nueva campaña.';
+    return;
+  }
+  var dd = c.datos;
+  draft = nuevoDraft();
+  draft.plantillaId = dd.plantillaId || '';
+  draft.nombre = dd.nombre || '';
+  draft.asunto = dd.asunto || '';
+  draft.preheader = dd.preheader || '';
+  draft.valores = (dd.valores && typeof dd.valores === 'object') ? JSON.parse(JSON.stringify(dd.valores)) : {};
+  draft.listas = (Array.isArray(dd.listas) ? dd.listas : []).map(String).filter(function(id){ return !!listaPorId(id); });
+  var p = plantillaActual();
+  if (!p) { draft.plantillaId = ''; }
+  camposDe(p).forEach(function(cp){
+    if (draft.valores[cp.clave] == null) draft.valores[cp.clave] = cp.defecto || '';
+  });
+  firmaPrueba = ''; emailsPrueba = []; horaPrueba = '';
+  duplicarArmado = false;
+  cambiarTab('email');
+  renderEmail();
+  toast(p ? 'Campaña cargada como nueva. Revísala, envía una prueba y lánzala.'
+          : 'Datos cargados, pero su plantilla ya no está activa: elige una.', 5000);
+}
+
+// v1.0.1: rellena el formulario con el borrador recuperado del backend.
+// Solo si el formulario está vacío, para no pisar lo que se esté editando
+// cuando llega otro initComunicaciones (reintento del handshake, Actualizar).
+function restaurarBorrador(b){
+  if (!b || !b.campaignId) return false;
+  if (draft.campaignId || draft.plantillaId || draft.asunto) return false;
+  draft = nuevoDraft();
+  draft.campaignId = String(b.campaignId);
+  draft.plantillaId = b.plantillaId || '';
+  draft.nombre = b.nombre || '';
+  draft.asunto = b.asunto || '';
+  draft.preheader = b.preheader || '';
+  draft.valores = (b.valores && typeof b.valores === 'object') ? b.valores : {};
+  draft.listas = (Array.isArray(b.listas) ? b.listas : []).map(String).filter(function(id){ return !!listaPorId(id); });
+  // Campos que la plantilla tenga ahora y el borrador no: su valor por defecto.
+  var p = plantillaActual();
+  if (!p) { draft.plantillaId = ''; }
+  camposDe(p).forEach(function(c){
+    if (draft.valores[c.clave] == null) draft.valores[c.clave] = c.defecto || '';
+  });
+  return true;
+}
+
+function renderCampos(){
+  var cont = $('camposPlantilla');
+  var p = plantillaActual();
+  if (!p) { cont.innerHTML = ''; return; }
+  var campos = camposDe(p);
+  if (!campos.length) { cont.innerHTML = ''; return; }
+
+  var h = '<div class="grupo"><div class="grupo-t">Contenido de la plantilla</div><div class="campos-grid">';
+  campos.forEach(function(c){
+    var id = 'cp_' + c.clave;
+    var val = draft.valores[c.clave] == null ? '' : draft.valores[c.clave];
+    // Los campos cortos van de dos en dos; los largos ocupan todo el ancho.
+    var ancho = c.tipo !== 'texto' || c.ancho === 'completo' || String(c.defecto || '').length > 32;
+    h += '<div class="fld' + (ancho ? ' ancho' : '') + '"><label for="' + id + '">' + esc(c.etiqueta || humanizar(c.clave)) + '</label>';
+    if (c.tipo === 'parrafo') {
+      h += '<textarea id="' + id + '" data-clave="' + esc(c.clave) + '" rows="4">' + esc(val) + '</textarea>';
+      h += '<div class="ayuda">' + esc(c.ayuda || 'Para destacar en negrita, escribe **así**.') + '</div>';
+    } else if (c.tipo === 'imagen') {
+      h += '<div class="imgfld"><div class="thumb">' + (val ? '<img src="' + esc(val) + '" alt="">' : 'Sin imagen') + '</div>' +
+           '<div class="imgctl"><input type="url" id="' + id + '" data-clave="' + esc(c.clave) + '" value="' + esc(val) + '" placeholder="https://static.wixstatic.com/media/…">' +
+           '<div class="imgbtns"><button class="btn btn-2 btn-sm" data-subir="' + esc(c.clave) + '">Subir imagen</button>' +
+           '<button class="btn btn-2 btn-sm" data-galeria="' + esc(c.clave) + '">Elegir del sitio</button></div></div></div>';
+      if (c.ayuda) h += '<div class="ayuda">' + esc(c.ayuda) + '</div>';
+    } else {
+      h += '<input type="' + (c.tipo === 'url' ? 'url' : 'text') + '" id="' + id + '" data-clave="' + esc(c.clave) + '" value="' + esc(val) + '">';
+      if (c.ayuda) h += '<div class="ayuda">' + esc(c.ayuda) + '</div>';
+    }
+    h += '</div>';
+  });
+  h += '</div></div>';
+  cont.innerHTML = h;
+}
+
+function renderContadores(){
+  var a = draft.asunto.length, p = draft.preheader.length;
+  $('cntAsunto').textContent = a + (a > LIM_ASUNTO ? ' · puede cortarse en móvil' : '');
+  $('cntAsunto').classList.toggle('warn', a > LIM_ASUNTO);
+  $('cntPre').textContent = p + (p > LIM_PRE ? ' · demasiado largo' : '');
+  $('cntPre').classList.toggle('warn', p > LIM_PRE);
+  $('s2').classList.toggle('done', !!draft.asunto.trim() && !!plantillaActual() && !camposVacios().length);
+}
+
+function renderListas(){
+  var cont = $('listas');
+  if (!LISTAS.length) {
+    cont.innerHTML = '<div class="vacio">No hay listas en Brevo. Importa los contactos en Brevo y pulsa Actualizar en Seguimiento para recargar.</div>';
+  } else {
+    var h = '';
+    LISTAS.forEach(function(l){
+      var on = draft.listas.indexOf(String(l.id)) >= 0;
+      h += '<label class="lista' + (on ? ' on' : '') + '"><input type="checkbox" data-lista="' + esc(l.id) + '"' + (on ? ' checked' : '') + '>' +
+           '<span class="ln">' + esc(l.nombre) + '</span><span class="lc">' + fmtNum(l.contactos) + '</span></label>';
+    });
+    cont.innerHTML = h;
+  }
+  $('totalDest').textContent = fmtNum(totalDestinatarios());
+  $('s3').classList.toggle('done', draft.listas.length > 0);
+}
+
+function renderPrueba(){
+  var e = $('estadoPrueba');
+  e.className = 'estado-prueba';
+  if (!firmaPrueba) {
+    e.textContent = 'Todavía no se ha enviado ninguna prueba.';
+  } else if (pruebaVigente()) {
+    e.className = 'estado-prueba ok';
+    e.textContent = 'Prueba enviada a las ' + horaPrueba + ' a ' + emailsPrueba.join(', ') + '. Revísala antes de enviar.';
+  } else {
+    e.className = 'estado-prueba caduca';
+    e.textContent = 'Has cambiado el correo después de la última prueba. Envía otra para poder lanzar la campaña.';
+  }
+  $('s4').classList.toggle('done', pruebaVigente());
+}
+
+function renderRemitente(){
+  var r = CFG.remitente || {};
+  $('remit').innerHTML =
+    '<dt>De</dt><dd>' + esc(r.nombre || '—') + ' &lt;' + esc(r.email || 'sin configurar') + '&gt;</dd>' +
+    '<dt>Respuestas a</dt><dd>' + esc(r.replyTo || '—') + '</dd>';
+  $('pvDe').textContent = (r.nombre || '—') + (r.email ? ' <' + r.email + '>' : '');
+}
+
+// Lo que falta para poder enviar. Vacío = se puede enviar.
+function pendientes(){
+  var f = [];
+  var r = CFG.remitente || {};
+  if (!r.email) f.push('Falta configurar el remitente.');
+  if (!plantillaActual()) f.push('Elige una plantilla.');
+  if (!draft.asunto.trim()) f.push('Escribe el asunto.');
+  var vac = camposVacios();
+  if (vac.length) f.push('Campos vacíos: ' + vac.map(function(c){ return c.etiqueta || humanizar(c.clave); }).join(', ') + '.');
+  if (!draft.listas.length) f.push('Elige al menos una lista de destinatarios.');
+  if (draft.modo === 'programada') {
+    if (!draft.fecha) f.push('Indica el día y la hora del envío.');
+    else if (new Date(draft.fecha).getTime() < Date.now() + 5 * 60 * 1000) f.push('La hora programada debe ser al menos 5 minutos posterior a ahora.');
+  }
+  if (!pruebaVigente()) f.push('Envía una prueba de la versión final.');
+  return f;
+}
+
+function renderEnvio(){
+  var prog = draft.modo === 'programada';
+  $('modoAhora').classList.toggle('on', !prog);
+  $('modoProg').classList.toggle('on', prog);
+  $('fldFecha').style.display = prog ? '' : 'none';
+  var f = pendientes();
+  $('pendientes').innerHTML = f.map(function(x){ return '<li>' + esc(x) + '</li>'; }).join('');
+  var b = $('btnEnviar');
+  b.disabled = ocupado || f.length > 0;
+  b.textContent = prog ? 'Programar campaña' : 'Enviar campaña';
+  $('btnPrueba').disabled = ocupado;
+  $('btnBorrador').disabled = ocupado || !plantillaActual();
+  $('s5').classList.toggle('done', !f.length);
+}
+
+var _tPrev = 0;
+function renderPreview(inmediata){
+  clearTimeout(_tPrev);
+  var hacer = function(){
+    $('pvAsunto').textContent = draft.asunto || '—';
+    $('pvPre').textContent = draft.preheader || '';
+    var p = plantillaActual();
+    var fr = $('prevFrame');
+    if (!p) { fr.style.display = 'none'; $('prevVacia').style.display = ''; return; }
+    $('prevVacia').style.display = 'none';
+    // v1.0.3: iframe nuevo en cada pintado → el navegador siempre repinta.
+    var nuevo = document.createElement('iframe');
+    nuevo.id = 'prevFrame';
+    nuevo.title = 'Vista previa del correo';
+    nuevo.setAttribute('sandbox', '');
+    nuevo.srcdoc = htmlVistaPrevia();
+    fr.parentNode.replaceChild(nuevo, fr);
+  };
+  if (inmediata) hacer(); else _tPrev = setTimeout(hacer, 250);
+}
+
+function renderEmail(){
+  renderPlantillas();
+  renderCampos();
+  $('inNombre').value = draft.nombre;
+  $('inAsunto').value = draft.asunto;
+  $('inPre').value = draft.preheader;
+  $('inFecha').value = draft.fecha;
+  var radios = document.querySelectorAll('input[name="modo"]');
+  for (var i = 0; i < radios.length; i++) radios[i].checked = (radios[i].value === draft.modo);
+  renderContadores();
+  renderListas();
+  renderPrueba();
+  renderRemitente();
+  renderEnvio();
+  renderPreview(true);
+  notifyHeight();
+}
+
+// Tras cualquier cambio de contenido: lo que depende del borrador.
+function alCambiar(){
+  renderContadores();
+  renderPrueba();
+  renderEnvio();
+  renderPreview(false);
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * RENDER — seguimiento
+ * ═════════════════════════════════════════════════════════════════════════ */
+var ESTADOS = { enviada:'Enviada', programada:'Programada', borrador:'Borrador', enviando:'Enviando' };
+
+function renderCampanias(){
+  var cont = $('tablaCamp');
+  $('segCuenta').textContent = CAMPANIAS.length ? CAMPANIAS.length + (CAMPANIAS.length === 1 ? ' campaña' : ' campañas') : '';
+  if (!CAMPANIAS.length) {
+    cont.innerHTML = '<div class="vacio">Aún no hay campañas. Crea la primera en la pestaña Nueva campaña de email.</div>';
+    $('detalle').style.display = 'none';
+    notifyHeight();
+    return;
+  }
+  var h = '<table class="tabla"><thead><tr><th>Campaña</th><th>Estado</th><th>Fecha</th>' +
+          '<th class="num">Destinatarios</th><th class="num">Entregados</th><th class="num">Aperturas</th>' +
+          '<th class="num">Clics</th><th class="num">Bajas</th><th class="num">Rebotes</th></tr></thead><tbody>';
+  CAMPANIAS.forEach(function(c){
+    var est = ESTADOS[c.estado] ? c.estado : 'borrador';
+    var ent = Number(c.entregados) || 0;
+    var enviada = est === 'enviada';
+    h += '<tr class="fila' + (c.id === campSel ? ' sel' : '') + '" data-camp="' + esc(c.id) + '">' +
+         '<td><div class="c-nom">' + esc(c.nombre || '(sin nombre)') + '</div><div class="c-asu">' + esc(c.asunto || '') + '</div></td>' +
+         '<td><span class="badge ' + est + '">' + (ESTADOS[c.estado] || esc(c.estado || '—')) + '</span></td>' +
+         '<td>' + fmtFecha(c.fecha) + '</td>' +
+         '<td class="num">' + fmtNum(c.destinatarios) + '</td>' +
+         '<td class="num">' + (enviada ? fmtNum(ent) + '<span class="pct">' + pct(ent, c.destinatarios) + '</span>' : '—') + '</td>' +
+         '<td class="num">' + (enviada ? fmtNum(c.aperturas) + '<span class="pct">' + pct(c.aperturas, ent) + '</span>' : '—') + '</td>' +
+         '<td class="num">' + (enviada ? fmtNum(c.clics) + '<span class="pct">' + pct(c.clics, ent) + '</span>' : '—') + '</td>' +
+         '<td class="num">' + (enviada ? fmtNum(c.bajas) : '—') + '</td>' +
+         '<td class="num">' + (enviada ? fmtNum(c.rebotes) : '—') + '</td></tr>';
+  });
+  h += '</tbody></table>';
+  cont.innerHTML = h;
+  renderDetalle();
+  notifyHeight();
+}
+
+function renderDetalle(){
+  var c = null;
+  for (var i = 0; i < CAMPANIAS.length; i++) { if (CAMPANIAS[i].id === campSel) c = CAMPANIAS[i]; }
+  var d = $('detalle');
+  if (!c) { d.style.display = 'none'; return; }
+  d.style.display = '';
+  // v1.0.2: duplicar solo si la campaña tiene sus datos guardados en el gestor.
+  $('detAcciones').style.display = c.datos ? '' : 'none';
+  duplicarArmado = false;
+  $('btnDuplicar').textContent = 'Duplicar como nueva campaña';
+  $('detNota').textContent = '';
+  $('detTitulo').textContent = c.nombre || '(sin nombre)';
+  $('detSub').textContent = (ESTADOS[c.estado] || c.estado || '') + ' · ' + (c.fecha ? fmtFecha(c.fecha) : 'sin fecha') + ' · ' + (c.asunto || '');
+  var ent = Number(c.entregados) || 0;
+  var k = function(v, l, p){ return '<div class="kpi"><div class="kv">' + v + '</div><div class="kl">' + l + '</div>' + (p ? '<div class="kp">' + p + '</div>' : '') + '</div>'; };
+  if (c.estado !== 'enviada') {
+    $('detKpis').innerHTML = k(fmtNum(c.destinatarios), 'Destinatarios previstos', '');
+    return;
+  }
+  $('detKpis').innerHTML =
+    k(fmtNum(ent), 'Entregados', pct(ent, c.destinatarios)) +
+    k(fmtNum(c.aperturas), 'Aperturas', pct(c.aperturas, ent)) +
+    k(fmtNum(c.clics), 'Clics', pct(c.clics, ent)) +
+    k(fmtNum(c.bajas), 'Bajas', pct(c.bajas, ent)) +
+    k(fmtNum(c.rebotes), 'Rebotes', pct(c.rebotes, c.destinatarios));
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * ACCIONES
+ * ═════════════════════════════════════════════════════════════════════════ */
+function elegirPlantilla(id){
+  draft.plantillaId = id;
+  var p = plantillaActual();
+  // Valores por defecto solo para los campos que aún no tienen contenido.
+  camposDe(p).forEach(function(c){
+    if (draft.valores[c.clave] == null || draft.valores[c.clave] === '') draft.valores[c.clave] = c.defecto || '';
+  });
+  renderEmail();
+}
+
+function emailsDe(texto){
+  return String(texto || '').split(/[\s,;]+/).map(function(s){ return s.trim(); }).filter(Boolean);
+}
+function emailValido(e){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
+
+function enviarPrueba(){
+  var p = plantillaActual();
+  if (!p) { toast('Elige una plantilla antes de enviar la prueba.'); return; }
+  if (!draft.asunto.trim()) { toast('Escribe el asunto antes de enviar la prueba.'); return; }
+  var lista = emailsDe($('inPrueba').value);
+  if (!lista.length) { toast('Escribe al menos una dirección de prueba.'); return; }
+  var malos = lista.filter(function(e){ return !emailValido(e); });
+  if (malos.length) { toast('Dirección no válida: ' + malos.join(', '), 4000); return; }
+  if (lista.length > 10) { toast('Máximo 10 direcciones de prueba.'); return; }
+  ocupado = true; renderEnvio();
+  enviarPrueba._firma = firmaDraft();
+  enviarPrueba._emails = lista;
+  send('enviarPrueba', { campania: payloadCampania(), emails: lista });
+  toast('Enviando prueba…');
+}
+
+function guardarBorrador(){
+  if (!plantillaActual()) return;
+  ocupado = true; renderEnvio();
+  send('guardarBorrador', { campania: payloadCampania() });
+  toast('Guardando borrador…');
+}
+
+function abrirOv(id, trigger){
+  var ov = $(id);
+  ov.style.height = document.documentElement.scrollHeight + 'px';
+  var y = trigger ? trigger.getBoundingClientRect().top + window.pageYOffset : window.pageYOffset;
+  ov.querySelector('.modal').style.marginTop = Math.max(16, y - 220) + 'px';
+  ov.classList.add('on');
+}
+
+function abrirConfirmacion(){
+  if (pendientes().length) return;
+  var prog = draft.modo === 'programada';
+  var n = totalDestinatarios();
+  var nombres = draft.listas.map(function(id){ var l = listaPorId(id); return l ? l.nombre : id; });
+  $('ovEnvioBig').innerHTML = prog
+    ? 'Se programará el envío a <b>' + fmtNum(n) + ' contactos</b>.'
+    : 'Se enviará ahora a <b>' + fmtNum(n) + ' contactos</b>. Una vez enviado no se puede deshacer.';
+  $('ovEnvioRes').innerHTML =
+    '<dt>Asunto</dt><dd>' + esc(draft.asunto) + '</dd>' +
+    '<dt>Listas</dt><dd>' + esc(nombres.join(', ')) + '</dd>' +
+    '<dt>Remitente</dt><dd>' + esc((CFG.remitente || {}).email || '') + '</dd>' +
+    '<dt>Cuándo</dt><dd>' + (prog ? fmtFecha(new Date(draft.fecha).toISOString()) : 'Ahora') + '</dd>';
+  $('btnConfirmarEnvio').textContent = prog ? 'Programar envío' : 'Enviar a ' + fmtNum(n) + ' contactos';
+  abrirOv('ovEnvio', $('btnEnviar'));
+  $('btnCancelarEnvio').focus({ preventScroll: true });
+}
+
+function confirmarEnvio(){
+  $('ovEnvio').classList.remove('on');
+  if (pendientes().length) return;
+  ocupado = true; renderEnvio();
+  send('enviarCampania', { campania: payloadCampania() });
+  toast(draft.modo === 'programada' ? 'Programando…' : 'Enviando campaña…', 4000);
+}
+
+function pedirSubida(clave){
+  imgClavePend = clave;
+  $('fileImg').value = '';
+  $('fileImg').click();
+}
+
+function leerImagen(file){
+  if (!file) return;
+  if (!/^image\/(jpeg|png|gif)$/.test(file.type)) { toast('Formato no válido: usa JPG, PNG o GIF.', 4000); return; }
+  if (file.size > MAX_IMG) { toast('La imagen pesa más de 3 MB. Redúcela antes de subirla.', 4000); return; }
+  var clave = imgClavePend;
+  var r = new FileReader();
+  r.onload = function(){
+    var b64 = String(r.result).split(',')[1] || '';
+    send('subirImagen', { clave: clave, base64Data: b64, fileName: file.name, mimeType: file.type });
+    toast('Subiendo imagen…', 4000);
+  };
+  r.onerror = function(){ toast('No se ha podido leer el archivo.'); };
+  r.readAsDataURL(file);
+}
+
+function abrirGaleria(clave, trigger){
+  imgClavePend = clave;
+  $('galeria').innerHTML = '<div class="vacio">Cargando imágenes…</div>';
+  abrirOv('ovGaleria', trigger);
+  send('getGaleria', {});
+}
+
+function ponerImagen(clave, url){
+  draft.valores[clave] = url;
+  renderCampos();
+  alCambiar();
+}
+
+function cambiarTab(t){
+  var tabs = document.querySelectorAll('.tab');
+  for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('on', tabs[i].getAttribute('data-tab') === t);
+  var ps = document.querySelectorAll('.panel');
+  for (var j = 0; j < ps.length; j++) ps[j].classList.toggle('on', ps[j].id === 'p-' + t);
+  if (t === 'seguimiento') send('getCampanias', {});
+  notifyHeight();
+}
+
+function bloquear(motivo){
+  $('mainBody').style.display = 'none';
+  document.querySelector('.status-bar').style.display = 'none';
+  document.querySelector('.tabs').style.display = 'none';
+  var g = $('gate'); g.style.display = 'block';
+  g.textContent = motivo || 'No tienes acceso al gestor de comunicaciones.';
+  notifyHeight();
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * MENSAJES  (Page → Widget)
+ * ═════════════════════════════════════════════════════════════════════════ */
+var handshakeOk = false;
+
+function recibir(msg){
+  if (!msg || typeof msg !== 'object' || !msg.type) return;
+  var p = msg.payload;
+
+  if (msg.type === 'initComunicaciones') {
+    handshakeOk = true;
+    if (!p || !p.ok) {
+      if (p && p.error && /acceso|sesión/i.test(p.error)) return bloquear(p.error);
+      $('sbEstado').textContent = 'Error de carga';
+      toast('Error: ' + (p ? p.error : 'desconocido'), 5000);
+      return;
+    }
+    CFG = p.config || CFG;
+    if (!CFG.remitente) CFG.remitente = {};
+    PLANTILLAS = p.plantillas || [];
+    LISTAS = p.listas || [];
+    // Las listas elegidas que ya no existan se descartan.
+    draft.listas = draft.listas.filter(function(id){ return !!listaPorId(id); });
+    var recuperado = restaurarBorrador(p.borrador);
+    $('sbEstado').textContent = 'Listo';
+    renderStatus();
+    renderEmail();
+    if (recuperado) toast('Borrador recuperado. Envía una prueba nueva antes de lanzar la campaña.', 4500);
+    return;
+  }
+
+  if (msg.type === 'imagenSubida') {
+    if (!p || !p.ok) { toast('Error subiendo la imagen: ' + (p ? p.error : '?'), 5000); return; }
+    ponerImagen(p.clave, p.publicUrl);
+    toast('Imagen subida');
+    return;
+  }
+
+  if (msg.type === 'galeria') {
+    var g = $('galeria');
+    if (!p || !p.ok) { g.innerHTML = '<div class="vacio">Error cargando imágenes: ' + esc(p ? p.error : '?') + '</div>'; return; }
+    var imgs = p.imagenes || [];
+    if (!imgs.length) { g.innerHTML = '<div class="vacio">No hay imágenes en el sitio.</div>'; return; }
+    g.innerHTML = imgs.map(function(im){
+      return '<button data-url="' + esc(im.url) + '" title="' + esc(im.nombre || '') + '"><img src="' + esc(im.url) + '" alt="' + esc(im.nombre || '') + '" loading="lazy"></button>';
+    }).join('');
+    return;
+  }
+
+  if (msg.type === 'borradorGuardado') {
+    ocupado = false;
+    if (!p || !p.ok) { toast('Error guardando el borrador: ' + (p ? p.error : '?'), 5000); renderEnvio(); return; }
+    if (p.campaignId) draft.campaignId = p.campaignId;
+    toast('Borrador guardado');
+    renderAvisoBorrador();
+    renderEnvio();
+    return;
+  }
+
+  if (msg.type === 'pruebaEnviada') {
+    ocupado = false;
+    if (!p || !p.ok) { toast('Error enviando la prueba: ' + (p ? p.error : '?'), 5000); renderEnvio(); return; }
+    if (p.campaignId) draft.campaignId = p.campaignId;
+    firmaPrueba = enviarPrueba._firma || firmaDraft();
+    emailsPrueba = p.emails || enviarPrueba._emails || [];
+    horaPrueba = new Date().toLocaleTimeString('es-ES', { hour:'2-digit', minute:'2-digit' });
+    toast('Prueba enviada');
+    renderAvisoBorrador();
+    renderPrueba();
+    renderEnvio();
+    return;
+  }
+
+  if (msg.type === 'campaniaEnviada') {
+    ocupado = false;
+    if (!p || !p.ok) { toast('Error en el envío: ' + (p ? p.error : '?'), 6000); renderEnvio(); return; }
+    toast(p.programada ? 'Campaña programada para ' + fmtFecha(p.fecha) : 'Campaña enviada', 5000);
+    campSel = p.campaignId || '';
+    draft = nuevoDraft();
+    firmaPrueba = ''; emailsPrueba = []; horaPrueba = '';
+    renderEmail();
+    cambiarTab('seguimiento');
+    return;
+  }
+
+  if (msg.type === 'borradorDescartado') {
+    ocupado = false;
+    if (!p || !p.ok) { toast('Error al descartar el borrador: ' + (p ? p.error : '?'), 5000); renderEnvio(); return; }
+    draft = nuevoDraft();
+    firmaPrueba = ''; emailsPrueba = []; horaPrueba = '';
+    descartarArmado = false;
+    renderEmail();
+    toast('Formulario vacío. El borrador sigue en Brevo pero ya no se recupera aquí.', 4500);
+    return;
+  }
+
+  if (msg.type === 'campanias') {
+    if (!p || !p.ok) { $('tablaCamp').innerHTML = '<div class="vacio">Error cargando campañas: ' + esc(p ? p.error : '?') + '</div>'; return; }
+    CAMPANIAS = p.campanias || [];
+    renderCampanias();
+    return;
+  }
+
+  if (msg.type === 'error') {
+    ocupado = false;
+    renderEnvio();
+    toast('Error: ' + (p ? p.error : 'desconocido'), 5000);
+    return;
+  }
+}
+
+window.addEventListener('message', function(event){ recibir(event.data); });
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * CABLEADO
+ * ═════════════════════════════════════════════════════════════════════════ */
+document.querySelector('.tabs').addEventListener('click', function(e){
+  var t = e.target.closest('.tab'); if (t) cambiarTab(t.getAttribute('data-tab'));
+});
+
+$('selPlantilla').addEventListener('change', function(){ elegirPlantilla(this.value); });
+$('inNombre').addEventListener('input', function(){ draft.nombre = this.value; });
+$('inAsunto').addEventListener('input', function(){ draft.asunto = this.value; alCambiar(); });
+$('inPre').addEventListener('input', function(){ draft.preheader = this.value; alCambiar(); });
+
+$('camposPlantilla').addEventListener('input', function(e){
+  var k = e.target.getAttribute('data-clave'); if (!k) return;
+  draft.valores[k] = e.target.value;
+  if (e.target.type === 'url' && e.target.closest('.imgfld')) {
+    var th = e.target.closest('.imgfld').querySelector('.thumb');
+    th.innerHTML = e.target.value ? '<img src="' + esc(e.target.value) + '" alt="">' : 'Sin imagen';
+  }
+  alCambiar();
+});
+$('camposPlantilla').addEventListener('click', function(e){
+  var b = e.target.closest('button'); if (!b) return;
+  if (b.hasAttribute('data-subir')) pedirSubida(b.getAttribute('data-subir'));
+  if (b.hasAttribute('data-galeria')) abrirGaleria(b.getAttribute('data-galeria'), b);
+});
+$('fileImg').addEventListener('change', function(){ leerImagen(this.files && this.files[0]); });
+
+$('listas').addEventListener('change', function(e){
+  var id = e.target.getAttribute('data-lista'); if (!id) return;
+  id = String(id);
+  var i = draft.listas.indexOf(id);
+  if (e.target.checked && i < 0) draft.listas.push(id);
+  if (!e.target.checked && i >= 0) draft.listas.splice(i, 1);
+  renderListas();
+  renderEnvio();
+});
+
+$('btnDescartar').addEventListener('click', function(){
+  if (!draft.campaignId || ocupado) return;
+  if (!descartarArmado) { descartarArmado = true; renderAvisoBorrador(); return; }
+  ocupado = true; renderEnvio();
+  send('descartarBorrador', { campaignId: draft.campaignId });
+});
+$('btnPrueba').addEventListener('click', enviarPrueba);
+$('btnBorrador').addEventListener('click', guardarBorrador);
+$('btnEnviar').addEventListener('click', abrirConfirmacion);
+$('btnCancelarEnvio').addEventListener('click', function(){ $('ovEnvio').classList.remove('on'); });
+$('btnConfirmarEnvio').addEventListener('click', confirmarEnvio);
+
+var radios = document.querySelectorAll('input[name="modo"]');
+for (var ri = 0; ri < radios.length; ri++) {
+  radios[ri].addEventListener('change', function(){ draft.modo = this.value; renderEnvio(); notifyHeight(); });
+}
+$('inFecha').addEventListener('input', function(){ draft.fecha = this.value; renderEnvio(); });
+
+document.querySelector('.seg').addEventListener('click', function(e){
+  var b = e.target.closest('button'); if (!b) return;
+  dispositivo = b.getAttribute('data-dev');
+  var bs = this.querySelectorAll('button');
+  for (var i = 0; i < bs.length; i++) bs[i].classList.toggle('on', bs[i] === b);
+  $('lienzo').classList.toggle('movil', dispositivo === 'movil');
+});
+
+$('btnDuplicar').addEventListener('click', duplicarCampania);
+$('btnRefrescarPrev').addEventListener('click', function(){ renderPreview(true); });
+
+$('btnRefrescar').addEventListener('click', function(){
+  $('tablaCamp').innerHTML = '<div class="vacio">Cargando campañas…</div>';
+  send('getCampanias', {});
+  send('ready', {});   // recarga también listas y plantillas
+});
+$('tablaCamp').addEventListener('click', function(e){
+  var tr = e.target.closest('tr.fila'); if (!tr) return;
+  campSel = tr.getAttribute('data-camp');
+  renderCampanias();
+});
+
+$('galeria').addEventListener('click', function(e){
+  var b = e.target.closest('button[data-url]'); if (!b) return;
+  ponerImagen(imgClavePend, b.getAttribute('data-url'));
+  $('ovGaleria').classList.remove('on');
+});
+$('btnCerrarGaleria').addEventListener('click', function(){ $('ovGaleria').classList.remove('on'); });
+
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape') { $('ovEnvio').classList.remove('on'); $('ovGaleria').classList.remove('on'); }
+});
+
+/* ── Alto del iframe ─────────────────────────────────────────────────── */
+var lastH = 0;
+function notifyHeight(){
+  if (DEMO) return;
+  var h = document.documentElement.scrollHeight;
+  if (h !== lastH) { lastH = h; send('resize', { height: h }); }
+}
+try { new ResizeObserver(notifyHeight).observe(document.body); }
+catch (e) { window.addEventListener('resize', notifyHeight); setInterval(notifyHeight, 1200); }
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * MODO DEMOSTRACIÓN — solo si el archivo se abre fuera de Wix
+ * Datos ficticios para revisar la interfaz. No llama a nada externo.
+ * ═════════════════════════════════════════════════════════════════════════ */
+function svgDato(w, h, fondo, color, texto, tam){
+  var s = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '"><rect width="100%" height="100%" fill="' + fondo + '"/>' +
+          '<text x="50%" y="54%" text-anchor="middle" font-family="Arial,sans-serif" font-size="' + tam + '" fill="' + color + '">' + texto + '</text></svg>';
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
+}
+
+function demoResponder(msg){
+  var r = function(type, payload, ms){ setTimeout(function(){ recibir({ type: type, payload: payload }); }, ms || 350); };
+  var tpl = $('demoPlantilla').textContent
+    .replace('__LOGO_NEGRO__', svgDato(440, 132, '#FFFFFE', '#045333', 'CENTRIMERCA', 44))
+    .replace('__LOGO_BLANCO__', svgDato(320, 96, '#045333', '#FFFFFE', 'CENTRIMERCA', 32));
+  var foto = svgDato(1072, 715, '#B7DACF', '#045333', 'Imagen de la noticia', 48);
+
+  switch (msg.type) {
+    case 'ready':
+      r('initComunicaciones', {
+        ok: true,
+        config: { remitente: { nombre: 'Centrimerca', email: 'novedades@comunicacion.centrimerca.com', replyTo: 'comunicacion@centrimerca.com' } },
+        plantillas: [{
+          id: 'demo-boletin',
+          nombre: 'Boletín de noticias',
+          descripcion: 'Una noticia destacada con imagen, tres datos clave y botón.',
+          html: tpl,
+          campos: [
+            { clave:'cabecera',    etiqueta:'Cabecera',                tipo:'texto',   defecto:'Boletín de Noticias · Octubre 2026' },
+            { clave:'titulo',      etiqueta:'Título del boletín',      tipo:'texto',   defecto:'Actualidad y Destacados' },
+            { clave:'entradilla',  etiqueta:'Entradilla',              tipo:'parrafo', defecto:'Noticias, eventos, presencia en el sector, novedades y otros hitos importantes de la actividad de Centrimerca.' },
+            { clave:'imagen',      etiqueta:'Imagen de la noticia',    tipo:'imagen',  defecto: foto, ayuda:'Ancho recomendado: 1072 px.' },
+            { clave:'imagenAlt',   etiqueta:'Descripción de la imagen',tipo:'texto',   defecto:'Entrada del Pabellón 5 de Fruit Attraction en IFEMA Madrid', ayuda:'Se muestra si el programa de correo bloquea las imágenes.' },
+            { clave:'etiqueta1',   etiqueta:'Etiqueta 1',              tipo:'texto',   defecto:'Eventos del sector' },
+            { clave:'etiqueta2',   etiqueta:'Etiqueta 2',              tipo:'texto',   defecto:'Novedades' },
+            { clave:'titular',     etiqueta:'Titular de la noticia',   tipo:'texto',   defecto:'Centrimerca estrena en Fruit Attraction 2026 su nueva plataforma digital: web, catálogo, IA CENTRI PRO y área de cliente.' },
+            { clave:'parrafo1',    etiqueta:'Primer párrafo',          tipo:'parrafo', defecto:'La compañía, mayorista de frutas y hortalizas con sede en Mercamadrid desde 1982, estará presente del 6 al 8 de octubre **en el stand del Grupo Catalá (Pabellón 5, Stand 5B00)** en la 18ª edición de la feria internacional del sector hortofrutícola, organizada por IFEMA MADRID y FEPEX.' },
+            { clave:'parrafo2',    etiqueta:'Segundo párrafo',         tipo:'parrafo', defecto:'Bajo el lema «Donde la esencia del sector conecta con el mundo», Fruit Attraction reunirá en IFEMA Madrid a más de 2.400 empresas y a más de 121.000 profesionales de más de 150 países. En ese marco, Centrimerca mostrará en directo el resultado de su proceso de digitalización.' },
+            { clave:'dato1Titulo', etiqueta:'Dato 1 · título',         tipo:'texto',   defecto:'Fechas' },
+            { clave:'dato1Valor',  etiqueta:'Dato 1 · valor',          tipo:'texto',   defecto:'6–8 oct' },
+            { clave:'dato2Titulo', etiqueta:'Dato 2 · título',         tipo:'texto',   defecto:'Lugar' },
+            { clave:'dato2Valor',  etiqueta:'Dato 2 · valor',          tipo:'texto',   defecto:'IFEMA' },
+            { clave:'dato3Titulo', etiqueta:'Dato 3 · título',         tipo:'texto',   defecto:'Stand' },
+            { clave:'dato3Valor',  etiqueta:'Dato 3 · valor',          tipo:'texto',   defecto:'P5 · 5B00' },
+            { clave:'botonTexto',  etiqueta:'Texto del botón',         tipo:'texto',   defecto:'Leer la noticia →' },
+            { clave:'botonUrl',    etiqueta:'Enlace del botón',        tipo:'url',     defecto:'https://centrimerca.es' }
+          ]
+        }],
+        listas: [
+          { id: '2', nombre: 'Clientes Centrimerca', contactos: 2487 },
+          { id: '3', nombre: 'Equipo interno (pruebas)', contactos: 6 }
+        ]
+      });
+      break;
+    case 'getCampanias':
+      r('campanias', { ok: true, campanias: [
+        { id:'11', nombre:'Prueba de arranque', asunto:'Prueba de envío desde la plataforma', estado:'enviada',
+          fecha:'2026-10-01T09:30:00.000Z', destinatarios:6, entregados:6, aperturas:5, clics:3, bajas:0, rebotes:0,
+          datos:{ plantillaId:'demo-boletin', nombre:'Prueba de arranque', asunto:'Prueba de envío desde la plataforma', preheader:'Pre de la prueba', valores:{ titulo:'Título de la enviada' }, listas:['3'] } },
+        { id:'12', nombre:'Boletín octubre · borrador', asunto:'Te esperamos en Fruit Attraction 2026', estado:'borrador',
+          fecha:'', destinatarios:2487, entregados:0, aperturas:0, clics:0, bajas:0, rebotes:0 }
+      ] });
+      break;
+    case 'guardarBorrador':
+      r('borradorGuardado', { ok: true, campaignId: msg.campania.campaignId || '12' }, 600);
+      break;
+    case 'enviarPrueba':
+      r('pruebaEnviada', { ok: true, campaignId: msg.campania.campaignId || '12', emails: msg.emails }, 800);
+      break;
+    case 'enviarCampania':
+      r('campaniaEnviada', { ok: true, campaignId: msg.campania.campaignId || '12',
+        programada: msg.campania.modo === 'programada', fecha: msg.campania.fecha }, 900);
+      break;
+    case 'descartarBorrador':
+      r('borradorDescartado', { ok: true, campaignId: msg.campaignId }, 400);
+      break;
+    case 'subirImagen':
+      r('imagenSubida', { ok: true, clave: msg.clave, publicUrl: 'data:' + msg.mimeType + ';base64,' + msg.base64Data }, 700);
+      break;
+    case 'getGaleria':
+      r('galeria', { ok: true, imagenes: [
+        { url: svgDato(600, 400, '#B7DACF', '#045333', 'Foto 1', 40), nombre: 'Foto 1' },
+        { url: svgDato(600, 400, '#09A072', '#FFFFFE', 'Foto 2', 40), nombre: 'Foto 2' },
+        { url: svgDato(600, 400, '#045333', '#FFFFFE', 'Foto 3', 40), nombre: 'Foto 3' }
+      ] });
+      break;
+  }
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * ARRANQUE — handshake con reintento (patrón obligatorio del proyecto)
+ * ═════════════════════════════════════════════════════════════════════════ */
+renderStatus();
+renderEmail();
+if (DEMO) $('hdDemo').style.display = 'inline-block';
+
+(function iniciarHandshake(){
+  send('ready', {});
+  if (DEMO) return;
+  var n = 0;
+  var t = setInterval(function(){
+    if (handshakeOk || n >= 20) { clearInterval(t); return; }
+    n++;
+    send('ready', {});
+  }, 700);
+})();
+</script>
+</body>
+</html>
