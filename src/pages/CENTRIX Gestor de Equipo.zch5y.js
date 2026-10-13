@@ -1,9 +1,12 @@
 /*
- * CENTRIMERCA — Gestor de equipo · Page Code · v1.0.0
+ * CENTRIMERCA — Gestor de equipo · Page Code · v1.0.2
  * Página:  la del backoffice donde vive el HtmlComponent del gestor.
  * Archivo: pega esto en el code panel de esa página.
  *
- * REQUIERE: centriEquipo.web.js v1.0.0 + Gestor_Equipo_Centrimerca_v1_0_0.html
+ * REQUIERE: centriEquipo.web.js v1.0.2 + Gestor_Equipo_Centrimerca_v1_0_2.html
+ *
+ * v1.0.2: nuevo mensaje moveMiembro → moverMiembro → miembroMovido (orden).
+ * v1.0.1: uploadImagen pasa `campo: msg.destino` ('imagen' | 'qr') al backend.
  *
  * QUÉ ES: un PUENTE PURO iframe ↔ backend. Cero decisiones, cero `if` sobre
  * contenido. Mismo patrón que ActualidadNoticias.page.js: recibe un
@@ -22,11 +25,12 @@
 import {
   listarEquipo,
   guardarMiembro,
+  moverMiembro,
   eliminarMiembro,
   uploadImagenMiembro
 } from 'backend/centriEquipo.web.js';
 
-const V  = 'Equipo Page v1.0.0';
+const V  = 'Equipo Page v1.0.2';
 const EL = '#htmlEquipoCentri';   // ← Element ID del HtmlComponent
 
 $w.onReady(function () {
@@ -60,6 +64,12 @@ $w.onReady(function () {
           break;
         }
 
+        case 'moveMiembro': {
+          const r = await moverMiembro({ miembroId: msg.miembroId, prevId: msg.prevId || '', nextId: msg.nextId || '' });
+          responder('miembroMovido', r);
+          break;
+        }
+
         case 'deleteMiembro': {
           const r = await eliminarMiembro({ miembroId: msg.miembroId });
           // Se reenvía miembroId a la vez que el payload: el widget lo usa para
@@ -72,6 +82,7 @@ $w.onReady(function () {
         case 'uploadImagen': {
           const r = await uploadImagenMiembro({
             miembroId: msg.id,
+            campo: msg.destino,
             base64Data: msg.base64Data,
             fileName: msg.fileName,
             mimeType: msg.mimeType
