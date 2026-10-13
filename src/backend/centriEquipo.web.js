@@ -1,9 +1,27 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * CENTRIMERCA — Gestor de Equipo · Backend web module · v1.0.0
+ * CENTRIMERCA — Gestor de Equipo · Backend web module · v1.0.2
  * Ruta: backend/centriEquipo.web.js
  * FECHA: 13 Octubre 2026
  *
- * REQUIERE: GestorEquipo.page.js v1.0.0 + Gestor_Equipo_Centrimerca_v1_0_0.html
+ * REQUIERE: GestorEquipo.page.js v1.0.2 + Gestor_Equipo_Centrimerca_v1_0_2.html
+ *
+ * v1.0.2: el ORDEN se edita desde el gestor.
+ *   - moverMiembro({ miembroId, prevId, nextId }): escribe en la fila movida
+ *     una clave de orden estrictamente entre las de sus nuevos vecinos. Solo
+ *     se toca la fila movida.
+ *   - El campo es el de orden manual de la colección (F.orden), el mismo por el
+ *     que ordena la página pública /centrimercaequipo (verificado 13/10: la web
+ *     muestra las 23 personas en el orden de esas claves, comparadas como texto).
+ *     Escritura del campo verificada contra la colección real (13/10, revertida).
+ *   - Altas: entran al final (clave posterior a la última).
+ *   - Mensajes visibles sin referencias a la plataforma.
+ *
+ * v1.0.1: el QR se puede cambiar desde el gestor.
+ *   - uploadImagenMiembro acepta `campo` ('imagen' | 'qr'): subir un QR propio.
+ *   - guardarMiembro acepta datos.qrDesdeVcard === true: genera el QR desde la
+ *     vCard con el patrón de las filas existentes.
+ *   - Al cambiar la vCard, el QR solo se regenera si el guardado ES el generado
+ *     desde la vCard anterior. Un QR subido a mano no se toca nunca.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * PROCEDENCIA
@@ -23,7 +41,10 @@
  * nombre (Texto) · rol (Texto) · descripcion (Texto plano) · imagen (Imagen)
  * email (Email, cifrado) · numeroTelefono (NÚMERO) · vcard (URL)
  * qr (Imagen; en los datos guarda una URL de quickchart.io)
- * Orden de la colección: campo interno de orden manual del CMS (solo lectura).
+ * Orden: campo de orden manual de la colección (F.orden), claves de texto en
+ *   alfabeto 0-9a-z que se comparan como texto ("0q" < "0qg" < "0r8" < "6").
+ *   ⚠️ El key incluye un UUID propio de esta colección: si algún día se rehace
+ *   el orden manual de la colección, hay que releer el key del esquema.
  *
  * Campos que este módulo NO toca y conserva por READ-MERGE-UPDATE:
  * createdDate, updatedDate, owner, createdDate1, updatedDate1, owner1,
@@ -31,8 +52,8 @@
  *
  * QR: el patrón NO se inventa. Las 23 filas existentes guardan
  *   qr = https://quickchart.io/qr?text=<vcard codificada>&size=300&margin=1&ecLevel=M&format=png
- *   Al guardar, si el enlace vCard cambia (o es alta), qr se regenera con
- *   ese mismo patrón para que el QR no quede apuntando a la vCard vieja.
+ *   Ese patrón se usa en el alta, al pulsar «Generar QR desde la vCard» y al
+ *   cambiar la vCard de una fila cuyo QR era el generado de la vCard anterior.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -41,7 +62,7 @@ import wixData from 'wix-data';
 import { mediaManager } from 'wix-media-backend';
 import { currentMember } from 'wix-members-backend';
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.2';
 const TAG = `[Equipo][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -64,8 +85,11 @@ const F = {
   telefono:    'numeroTelefono',  // ⚠️ "Número": sin +34, sin espacios, sin 0 inicial
   vcard:       'vcard',           // "URL"
   qr:          'qr',              // "Imagen"; en los datos guarda URL de quickchart.io
-  orden:       '_manualSort_70208d3c-3970-4f20-ac00-b50accefda3d'  // orden manual del CMS (solo lectura)
+  orden:       '_manualSort_70208d3c-3970-4f20-ac00-b50accefda3d'  // orden manual de la colección
 };
+
+// Campos de imagen que admite la subida.
+const CAMPOS_IMAGEN = { imagen: F.imagen, qr: F.qr };
 
 // ── Patrón del QR, copiado de los datos existentes ─────────────────────────
 const QR_BASE   = 'https://quickchart.io/qr?text=';
@@ -168,15 +192,16 @@ function _qrDesdeVcard(vcard) {
 }
 
 // `numeroTelefono` es de tipo Número: se aceptan cifras (y espacios/puntos/
-// guiones, que se quitan). Se rechaza lo que el Número perdería en silencio.
+// guiones, que se quitan). Se rechaza lo que el Número perdería en silencio
+// (+34, letras, 0 inicial).
 function _telefono(v) {
   const s = _txt(v).replace(/[\s.\-()]/g, '');
   if (!s) { return { ok: true, valor: null }; }
   if (!/^\d+$/.test(s)) {
-    return { ok: false, error: 'El teléfono solo admite cifras: el campo del CMS es de tipo Número (sin +34 ni letras).' };
+    return { ok: false, error: 'El teléfono solo admite cifras, sin +34 ni letras.' };
   }
   if (s.charAt(0) === '0') {
-    return { ok: false, error: 'El teléfono no puede empezar por 0: el campo del CMS es de tipo Número y lo perdería.' };
+    return { ok: false, error: 'El teléfono no puede empezar por 0.' };
   }
   return { ok: true, valor: Number(s) };
 }
@@ -185,7 +210,7 @@ function _emailValido(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
 
 function _urlValida(u) { return /^https?:\/\/\S+$/i.test(u); }
 
-// Orden manual del CMS (cadena). Las filas sin clave van al final.
+// Orden manual de la colección (cadena). Las filas sin clave van al final.
 function _compararOrden(a, b) {
   const ka = a[F.orden];
   const kb = b[F.orden];
@@ -197,7 +222,63 @@ function _compararOrden(a, b) {
   return 0;
 }
 
-// De fila del CMS → objeto que consume el widget.
+// ── Claves de orden ────────────────────────────────────────────────────────
+// Alfabeto de las claves existentes (0-9a-z). Se comparan como texto.
+const DIGITOS = '0123456789abcdefghijklmnopqrstuvwxyz';
+
+function _claveValida(k) { return typeof k === 'string' && /^[0-9a-z]*[1-9a-z]$/.test(k); }
+
+// Clave estrictamente entre a y b, comparando como texto.
+// a = '' → antes del primero · b = null → después del último.
+// Punto medio de índices fraccionarios (algoritmo de rocicorp/fractional-indexing,
+// dominio público CC0). Requiere claves sin '0' final, como las existentes.
+function _claveEntre(a, b) {
+  const cero = DIGITOS[0];
+  if (b !== null && a >= b) { throw new Error(`orden inconsistente: "${a}" >= "${b}"`); }
+  if (a.slice(-1) === cero || (b && b.slice(-1) === cero)) { throw new Error('clave de orden con 0 final'); }
+  if (b) {
+    let n = 0;
+    while ((a[n] || cero) === b[n]) { n++; }
+    if (n > 0) { return b.slice(0, n) + _claveEntre(a.slice(n), b.slice(n)); }
+  }
+  const dA = a ? DIGITOS.indexOf(a[0]) : 0;
+  const dB = (b !== null) ? DIGITOS.indexOf(b[0]) : DIGITOS.length;
+  if (dB - dA > 1) { return DIGITOS[Math.round(0.5 * (dA + dB))]; }
+  if (b && b.length > 1) { return b.slice(0, 1); }
+  return DIGITOS[dA] + _claveEntre(a.slice(1), null);
+}
+
+// Lee toda la colección y la devuelve en el orden de la web.
+async function _leerOrdenado() {
+  const res = await wixData.query(COL)
+    .limit(LIMITE)
+    .find(AUTH);
+  return (res.items || []).slice().sort(_compararOrden);
+}
+
+// Clave para una fila nueva: detrás de la última.
+function _claveAlFinal(filas) {
+  let ultima = '';
+  filas.forEach(f => { if (_claveValida(f[F.orden])) { ultima = f[F.orden]; } });
+  return _claveEntre(ultima, null);
+}
+
+// Filas sin clave (p. ej. altas antiguas): se les da clave al final, en su orden.
+async function _asegurarClaves(filas) {
+  let ultima = '';
+  for (const f of filas) {
+    const k = f[F.orden];
+    if (typeof k === 'string' && k !== '') { ultima = k; continue; }
+    const nueva = _claveEntre(ultima, null);
+    await wixData.update(COL, Object.assign({}, f, { [F.orden]: nueva }), AUTH);
+    console.log(`${TAG} clave de orden asignada a ${f._id}: ${nueva}`);
+    f[F.orden] = nueva;
+    ultima = nueva;
+  }
+  return filas;
+}
+
+// De fila de la colección → objeto que consume el widget.
 function _mapMiembro(it) {
   const tel = it[F.telefono];
   return {
@@ -214,7 +295,7 @@ function _mapMiembro(it) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 1. LISTAR EQUIPO  (en el orden manual del CMS)
+// 1. LISTAR EQUIPO  (en el orden de la web)
 // ═══════════════════════════════════════════════════════════════════════════
 export const listarEquipo = webMethod(
   Permissions.SiteMember,
@@ -223,11 +304,7 @@ export const listarEquipo = webMethod(
     if (!guard.ok) { return { ok: false, error: guard.error }; }
 
     try {
-      const res = await wixData.query(COL)
-        .limit(LIMITE)
-        .find(AUTH);
-
-      const filas = (res.items || []).slice().sort(_compararOrden);
+      const filas = await _leerOrdenado();
       const equipo = filas.map(_mapMiembro);
       console.log(`${TAG} listar: ${equipo.length} personas`);
       return { ok: true, equipo };
@@ -241,9 +318,11 @@ export const listarEquipo = webMethod(
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 2. GUARDAR PERSONA (alta o edición)
-// La imagen NO se escribe aquí: se sube aparte (uploadImagenMiembro). En
+// La foto NO se escribe aquí: se sube aparte (uploadImagenMiembro). En
 // edición se hace READ-MERGE-UPDATE para no pisar `imagen` ni otros campos.
-// `qr` se regenera solo si cambia el enlace vCard (o es alta).
+// `qr`: se genera desde la vCard en el alta, si datos.qrDesdeVcard === true,
+// o si cambia la vCard y el QR guardado era el generado de la anterior.
+// Un QR subido a mano (uploadImagenMiembro con campo 'qr') no se toca.
 // ═══════════════════════════════════════════════════════════════════════════
 export const guardarMiembro = webMethod(
   Permissions.SiteMember,
@@ -264,6 +343,9 @@ export const guardarMiembro = webMethod(
     const tel = _telefono(d.telefono);
     if (!tel.ok) { return { ok: false, error: tel.error }; }
 
+    const qrDesdeVcard = (d.qrDesdeVcard === true);
+    if (qrDesdeVcard && !vcard) { return { ok: false, error: 'Para generar el QR hace falta el enlace vCard.' }; }
+
     try {
       const campos = {
         [F.nombre]:      nombre,
@@ -278,12 +360,22 @@ export const guardarMiembro = webMethod(
       if (miembroId) {
         const actual = await wixData.get(COL, miembroId, AUTH);
         if (!actual) { return { ok: false, error: 'Persona no encontrada.' }; }
-        if (vcard !== _txt(actual[F.vcard])) {
+        const vcardAnterior = _txt(actual[F.vcard]);
+        if (qrDesdeVcard) {
+          campos[F.qr] = _qrDesdeVcard(vcard);
+        } else if (vcard !== vcardAnterior && _txt(actual[F.qr]) === _qrDesdeVcard(vcardAnterior)) {
+          // El QR guardado es el generado de la vCard anterior → se mantiene al día.
           campos[F.qr] = _qrDesdeVcard(vcard) || null;
         }
         guardado = await wixData.update(COL, Object.assign({}, actual, campos), AUTH);
       } else {
         campos[F.qr] = _qrDesdeVcard(vcard) || null;
+        // Alta: entra al final de la lista.
+        try {
+          campos[F.orden] = _claveAlFinal(await _leerOrdenado());
+        } catch (eOrden) {
+          console.warn(`${TAG} alta sin clave de orden (se asignará al mover):`, eOrden.message);
+        }
         guardado = await wixData.insert(COL, campos, AUTH);
       }
 
@@ -293,6 +385,59 @@ export const guardarMiembro = webMethod(
     } catch (e) {
       console.error(`${TAG} ❌ guardarMiembro:`, e.message);
       return { ok: false, error: e.message };
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2b. MOVER PERSONA (orden)
+// prevId / nextId = vecinos tras el movimiento ('' si es el primero/último).
+// Se leen las claves frescas, se calcula una estrictamente entre las de los
+// vecinos y se escribe SOLO en la fila movida (READ-MERGE-UPDATE).
+// Devuelve la lista completa en el orden nuevo.
+// ═══════════════════════════════════════════════════════════════════════════
+export const moverMiembro = webMethod(
+  Permissions.SiteMember,
+  async ({ miembroId, prevId, nextId }) => {
+    const guard = await _exigirAdmin();
+    if (!guard.ok) { return { ok: false, error: guard.error }; }
+    if (!miembroId) { return { ok: false, error: 'Falta miembroId.' }; }
+    if (miembroId === prevId || miembroId === nextId) { return { ok: false, error: 'Movimiento no válido.' }; }
+
+    try {
+      const filas = await _asegurarClaves(await _leerOrdenado());
+
+      const porId = {};
+      filas.forEach(f => { porId[f._id] = f; });
+
+      const fila = porId[miembroId];
+      if (!fila) { return { ok: false, error: 'Persona no encontrada.' }; }
+      const prev = prevId ? porId[prevId] : null;
+      const next = nextId ? porId[nextId] : null;
+      if ((prevId && !prev) || (nextId && !next)) {
+        return { ok: false, error: 'La lista ha cambiado. Recarga la página.' };
+      }
+
+      const a = prev ? prev[F.orden] : '';
+      const b = next ? next[F.orden] : null;
+      if ((prev && !_claveValida(a)) || (next && !_claveValida(b))) {
+        throw new Error(`clave de orden no válida: "${a}" / "${b}"`);
+      }
+
+      const clave = _claveEntre(a, b);
+      if (!(clave > a) || (b !== null && !(clave < b))) {
+        throw new Error(`clave fuera de rango: "${a}" < "${clave}" < "${b}"`);
+      }
+
+      await wixData.update(COL, Object.assign({}, fila, { [F.orden]: clave }), AUTH);
+      console.log(`${TAG} ✅ orden ${miembroId}: "${fila[F.orden]}" → "${clave}" (entre "${a}" y "${b}")`);
+
+      const equipo = (await _leerOrdenado()).map(_mapMiembro);
+      return { ok: true, equipo };
+
+    } catch (e) {
+      console.error(`${TAG} ❌ moverMiembro:`, e.message);
+      return { ok: false, error: 'No se pudo guardar el nuevo orden. Recarga la página e inténtalo de nuevo.' };
     }
   }
 );
@@ -320,15 +465,20 @@ export const eliminarMiembro = webMethod(
 );
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 4. SUBIR FOTO DE PERSONA
+// 4. SUBIR FOTO O QR DE PERSONA
 // Patrón literal de uploadImagenNoticia (centriActualidad.web.js):
-// mediaManager.upload → fileUrl → READ-MERGE-UPDATE de `imagen`.
+// mediaManager.upload → fileUrl → READ-MERGE-UPDATE del campo pedido.
+// campo: 'imagen' (por defecto) | 'qr'.
 // ═══════════════════════════════════════════════════════════════════════════
 export const uploadImagenMiembro = webMethod(
   Permissions.SiteMember,
-  async ({ miembroId, base64Data, fileName, mimeType }) => {
+  async ({ miembroId, campo, base64Data, fileName, mimeType }) => {
     const guard = await _exigirAdmin();
     if (!guard.ok) { return { ok: false, error: guard.error }; }
+
+    const nombreCampo = campo || 'imagen';
+    const key = CAMPOS_IMAGEN[nombreCampo];
+    if (!key) { return { ok: false, error: `Campo de imagen no permitido: ${nombreCampo}` }; }
 
     if (!miembroId || !base64Data || !fileName) {
       return { ok: false, error: 'Faltan parámetros (miembroId, base64Data, fileName).' };
@@ -356,13 +506,13 @@ export const uploadImagenMiembro = webMethod(
       );
 
       const fileUrl = (uploadResult && uploadResult.fileUrl) || '';
-      if (!fileUrl) { return { ok: false, error: 'Media Manager no devolvió fileUrl.' }; }
+      if (!fileUrl) { return { ok: false, error: 'No se pudo guardar la imagen.' }; }
 
       // READ-MERGE-UPDATE con el registro completo ya leído
-      await wixData.update(COL, Object.assign({}, registro, { [F.imagen]: fileUrl }), AUTH);
+      await wixData.update(COL, Object.assign({}, registro, { [key]: fileUrl }), AUTH);
 
-      console.log(`${TAG} ✅ foto subida y ${COL}.${F.imagen} actualizado: ${fileUrl}`);
-      return { ok: true, fileUrl, publicUrl: _imgUrl(fileUrl) };
+      console.log(`${TAG} ✅ ${nombreCampo} subido y ${COL}.${key} actualizado: ${fileUrl}`);
+      return { ok: true, campo: nombreCampo, fileUrl, publicUrl: _imgUrl(fileUrl) };
 
     } catch (e) {
       console.error(`${TAG} ❌ uploadImagenMiembro:`, e.message);
