@@ -1,9 +1,17 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * CENTRIMERCA — Gestor de Equipo · Backend web module · v1.0.2
+ * CENTRIMERCA — Gestor de Equipo · Backend web module · v1.0.3
  * Ruta: backend/centriEquipo.web.js
- * FECHA: 13 Octubre 2026
+ * FECHA: 14 Octubre 2026
  *
- * REQUIERE: GestorEquipo.page.js v1.0.2 + Gestor_Equipo_Centrimerca_v1_0_2.html
+ * REQUIERE: GestorEquipo.page.js v1.0.3 + Gestor_Equipo_Centrimerca_v1_0_4.html
+ *
+ * v1.0.3: visible / no visible y duplicar.
+ *   - Campo `activo` (Booleano, verificado en el esquema el 14/10).
+ *   - guardarMiembro escribe `activo`. Alta: no visible salvo que se marque.
+ *   - toggleMiembroActivo({ miembroId, valor }): READ-MERGE-UPDATE de `activo`.
+ *   - duplicarMiembro({ miembroId }): crea una copia con los campos de la
+ *     ficha (lista blanca, nunca el registro entero), nombre + " (copia)",
+ *     NO visible, colocada justo debajo del original.
  *
  * v1.0.2: el ORDEN se edita desde el gestor.
  *   - moverMiembro({ miembroId, prevId, nextId }): escribe en la fila movida
@@ -62,7 +70,7 @@ import wixData from 'wix-data';
 import { mediaManager } from 'wix-media-backend';
 import { currentMember } from 'wix-members-backend';
 
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const TAG = `[Equipo][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -85,6 +93,7 @@ const F = {
   telefono:    'numeroTelefono',  // ⚠️ "Número": sin +34, sin espacios, sin 0 inicial
   vcard:       'vcard',           // "URL"
   qr:          'qr',              // "Imagen"; en los datos guarda URL de quickchart.io
+  activo:      'activo',          // "Booleano": visible en la web
   orden:       '_manualSort_70208d3c-3970-4f20-ac00-b50accefda3d'  // orden manual de la colección
 };
 
@@ -290,7 +299,8 @@ function _mapMiembro(it) {
     telefono:    (typeof tel === 'number' && Number.isFinite(tel)) ? String(tel) : _txt(tel),
     vcard:       _txt(it[F.vcard]),
     qr:          _imgUrl(it[F.qr]),
-    imagen:      _imgUrl(it[F.imagen])
+    imagen:      _imgUrl(it[F.imagen]),
+    activo:      it[F.activo] === true
   };
 }
 
@@ -353,7 +363,8 @@ export const guardarMiembro = webMethod(
         [F.descripcion]: _txt(d.descripcion),
         [F.email]:       email || null,
         [F.telefono]:    tel.valor,
-        [F.vcard]:       vcard || null
+        [F.vcard]:       vcard || null,
+        [F.activo]:      d.activo === true
       };
 
       let guardado;
@@ -438,6 +449,87 @@ export const moverMiembro = webMethod(
     } catch (e) {
       console.error(`${TAG} ❌ moverMiembro:`, e.message);
       return { ok: false, error: 'No se pudo guardar el nuevo orden. Recarga la página e inténtalo de nuevo.' };
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2c. VISIBLE / NO VISIBLE  (READ-MERGE-UPDATE de `activo`)
+// Mismo patrón que toggleNoticiaCampo (centriActualidad.web.js).
+// ═══════════════════════════════════════════════════════════════════════════
+export const toggleMiembroActivo = webMethod(
+  Permissions.SiteMember,
+  async ({ miembroId, valor }) => {
+    const guard = await _exigirAdmin();
+    if (!guard.ok) { return { ok: false, error: guard.error }; }
+    if (!miembroId) { return { ok: false, error: 'Falta miembroId.' }; }
+
+    try {
+      const actual = await wixData.get(COL, miembroId, AUTH);
+      if (!actual) { return { ok: false, error: 'Persona no encontrada.' }; }
+
+      const nuevoValor = (valor === true || valor === 'true');
+      await wixData.update(COL, Object.assign({}, actual, { [F.activo]: nuevoValor }), AUTH);
+
+      console.log(`${TAG} ✅ activo ${miembroId}: ${nuevoValor}`);
+      return { ok: true, id: miembroId, valor: nuevoValor };
+
+    } catch (e) {
+      console.error(`${TAG} ❌ toggleMiembroActivo:`, e.message);
+      return { ok: false, error: e.message };
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2d. DUPLICAR PERSONA
+// Copia SOLO los campos de la ficha (lista blanca). Nunca el registro entero:
+// así no se copian _id, la clave de orden, enlaces de página ni campos sueltos.
+// La copia nace NO visible, con nombre + " (copia)", justo debajo del original.
+// Devuelve la copia y la lista completa en el orden nuevo.
+// ═══════════════════════════════════════════════════════════════════════════
+const CAMPOS_DUPLICABLES = [F.rol, F.descripcion, F.imagen, F.email, F.telefono, F.vcard, F.qr];
+
+export const duplicarMiembro = webMethod(
+  Permissions.SiteMember,
+  async ({ miembroId }) => {
+    const guard = await _exigirAdmin();
+    if (!guard.ok) { return { ok: false, error: guard.error }; }
+    if (!miembroId) { return { ok: false, error: 'Falta miembroId.' }; }
+
+    try {
+      const filas = await _asegurarClaves(await _leerOrdenado());
+      const i = filas.findIndex(f => f._id === miembroId);
+      if (i < 0) { return { ok: false, error: 'Persona no encontrada.' }; }
+      const origen = filas[i];
+
+      const copia = {
+        [F.nombre]: `${_txt(origen[F.nombre])} (copia)`,
+        [F.activo]: false
+      };
+      CAMPOS_DUPLICABLES.forEach(k => {
+        if (origen[k] !== undefined && origen[k] !== null) { copia[k] = origen[k]; }
+      });
+
+      // Justo debajo del original.
+      try {
+        const a = origen[F.orden];
+        const b = (i + 1 < filas.length) ? filas[i + 1][F.orden] : null;
+        const clave = _claveEntre(a, b);
+        if (clave > a && (b === null || clave < b)) { copia[F.orden] = clave; }
+      } catch (eOrden) {
+        console.warn(`${TAG} copia sin clave de orden (irá al final):`, eOrden.message);
+      }
+
+      const creada = await wixData.insert(COL, copia, AUTH);
+      console.log(`${TAG} ✅ duplicada ${miembroId} → ${creada._id}`);
+
+      const equipo = (await _leerOrdenado()).map(_mapMiembro);
+      return { ok: true, miembro: _mapMiembro(creada), equipo };
+
+    } catch (e) {
+      console.error(`${TAG} ❌ duplicarMiembro:`, e.message);
+      return { ok: false, error: 'No se pudo duplicar la ficha.' };
     }
   }
 );
