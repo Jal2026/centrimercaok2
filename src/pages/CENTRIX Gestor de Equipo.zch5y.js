@@ -1,10 +1,12 @@
 /*
- * CENTRIMERCA — Gestor de equipo · Page Code · v1.0.2
+ * CENTRIMERCA — Gestor de equipo · Page Code · v1.0.3
  * Página:  la del backoffice donde vive el HtmlComponent del gestor.
  * Archivo: pega esto en el code panel de esa página.
  *
- * REQUIERE: centriEquipo.web.js v1.0.2 + Gestor_Equipo_Centrimerca_v1_0_2.html
+ * REQUIERE: centriEquipo.web.js v1.0.3 + Gestor_Equipo_Centrimerca_v1_0_4.html
  *
+ * v1.0.3: toggleMiembro → toggleMiembroActivo → miembroToggled (visible).
+ *         duplicarMiembro → duplicarMiembro → miembroDuplicado.
  * v1.0.2: nuevo mensaje moveMiembro → moverMiembro → miembroMovido (orden).
  * v1.0.1: uploadImagen pasa `campo: msg.destino` ('imagen' | 'qr') al backend.
  *
@@ -26,11 +28,13 @@ import {
   listarEquipo,
   guardarMiembro,
   moverMiembro,
+  toggleMiembroActivo,
+  duplicarMiembro,
   eliminarMiembro,
   uploadImagenMiembro
 } from 'backend/centriEquipo.web.js';
 
-const V  = 'Equipo Page v1.0.2';
+const V  = 'Equipo Page v1.0.3';
 const EL = '#htmlEquipoCentri';   // ← Element ID del HtmlComponent
 
 $w.onReady(function () {
@@ -67,6 +71,18 @@ $w.onReady(function () {
         case 'moveMiembro': {
           const r = await moverMiembro({ miembroId: msg.miembroId, prevId: msg.prevId || '', nextId: msg.nextId || '' });
           responder('miembroMovido', r);
+          break;
+        }
+
+        case 'toggleMiembro': {
+          const r = await toggleMiembroActivo({ miembroId: msg.miembroId, valor: msg.valor });
+          responder('miembroToggled', r);
+          break;
+        }
+
+        case 'duplicarMiembro': {
+          const r = await duplicarMiembro({ miembroId: msg.miembroId });
+          responder('miembroDuplicado', r);
           break;
         }
 
