@@ -1,7 +1,21 @@
 /*
  * CENTRIMERCA — Ficha de Contacto · Custom Element
- * Archivo:  fichaContacto.js   ·   v1.0.3
+ * Archivo:  fichaContacto.js   ·   v1.0.4
  * Tag name: ficha-contacto      ·   Element ID esperado: #fichaContacto
+ *
+ * REQUIERE: Page Code de la ficha v1.0.1 (manda las fotos reducidas y
+ *   imagenOrig / fotoGeneralOrig). Con el Page Code v1.0.0 sigue funcionando
+ *   con las fotos originales.
+ *
+ * v1.0.4 —
+ *   - «Compartir» también en ESCRITORIO: arriba a la derecha de la columna de
+ *     la foto, a la altura del logo. Mismo comportamiento que en móvil.
+ *     Los dos botones comparten clase (.share-btn / .share-ok).
+ *   - Fotos: si el payload trae imagenOrig / fotoGeneralOrig y la versión
+ *     reducida falla al cargar, se usa la original (data-orig + onerror).
+ *   CSS: .share-ok (común), .m-share-ok, .d-share, .d-share-ok.
+ *   JS: _render (cablea .share-btn y data-orig), _compartir(btn),
+ *   _avisoCopiado(btn), _htmlMovil y _htmlEscritorio (botón y data-orig).
  *
  * v1.0.3 — Radio de esquina = 10 % del ALTO de cada bloque (v1.0.2 lo
  *   calculaba sobre el ancho y en la banda equivalía a un 32 %):
@@ -188,14 +202,16 @@
     }
     .m-share:hover{ background:#CFE5E3; }
     .m-share:focus-visible{ outline:2px solid #E80A4D; outline-offset:2px; }
-    .m-share-ok{
-      position:absolute; top:48px; right:0; z-index:2;
+    /* Aviso «Enlace copiado» (común a móvil y escritorio) */
+    .share-ok{
+      position:absolute; z-index:2;
       padding:4px 10px; border-radius:999px;
       background:#00393C; color:#FFFFFF;
       font-size:12px; font-weight:600; white-space:nowrap;
       opacity:0; pointer-events:none; transition:opacity .2s ease;
     }
-    .m-share-ok.on{ opacity:1; }
+    .share-ok.on{ opacity:1; }
+    .m-share-ok{ top:48px; right:0; }
     .m-portrait{
       flex:0 0 auto; display:block;
       width:132px; height:132px; border-radius:34px;
@@ -288,6 +304,19 @@
       background:linear-gradient(178deg, rgba(0,97,102,0.62) 0%, rgba(0,97,102,0.06) 30%, rgba(0,97,102,0.55) 58%, rgba(0,97,102,0.92) 80%, #006166 100%);
     }
     .d-logo{ position:relative; display:block; align-self:flex-start; height:60px; width:auto; }
+
+    /* «Compartir» en escritorio (v1.0.4): arriba a la derecha, a la altura del logo */
+    .d-share{
+      position:absolute; top:36px; right:36px; z-index:2;
+      display:flex; align-items:center; justify-content:center;
+      width:44px; height:44px; padding:0; border-radius:50%;
+      background:rgba(255,255,255,0.16); border:1px solid rgba(255,255,255,0.38);
+      color:#FFFFFF; cursor:pointer;
+      transition:background .15s ease;
+    }
+    .d-share:hover{ background:rgba(255,255,255,0.28); }
+    .d-share:focus-visible{ outline:2px solid #FFFFFF; outline-offset:2px; }
+    .d-share-ok{ top:88px; right:36px; }
     .d-logo-hueco{ position:relative; height:60px; }
     .d-id{ position:relative; display:flex; flex-direction:column; align-items:flex-start; }
     .d-portrait{
@@ -462,6 +491,11 @@
       return externo ? ' target="_blank" rel="noopener"' : '';
     }
 
+    // v1.0.4: atributo data-orig (foto original de reserva), si llega
+    _orig(url) {
+      return url ? ' data-orig="' + this._e(url) + '"' : '';
+    }
+
     _render() {
       const p = this._data;
 
@@ -477,17 +511,24 @@
 
       this._root.innerHTML = this._htmlMovil(p) + this._htmlEscritorio(p);
 
-      // v1.0.2: botón «Compartir» (móvil)
-      const share = this._root.querySelector('.m-share');
-      if (share) {
-        share.addEventListener('click', () => this._compartir());
-      }
+      // v1.0.4: botones «Compartir» (móvil y escritorio)
+      this._root.querySelectorAll('.share-btn').forEach((btn) => {
+        btn.addEventListener('click', () => this._compartir(btn));
+      });
+
+      // v1.0.4: si la foto reducida falla, la original
+      this._root.querySelectorAll('img[data-orig]').forEach((img) => {
+        img.addEventListener('error', () => {
+          const orig = img.getAttribute('data-orig');
+          if (orig && img.getAttribute('src') !== orig) { img.setAttribute('src', orig); }
+        }, { once: true });
+      });
     }
 
     // ── Compartir (v1.0.2) ──────────────────────────────────────────────────
     // Menú de compartir del móvil con la URL de la ficha. Sin él (escritorio
     // o navegador antiguo): copia el enlace y avisa.
-    async _compartir() {
+    async _compartir(btn) {
       const p = this._data || {};
       const url = String(window.location.href).split('#')[0];
       const titulo = (p.nombre ? p.nombre + ' · ' : '') + 'Centrimerca';
@@ -504,14 +545,15 @@
 
       try {
         await navigator.clipboard.writeText(url);
-        this._avisoCopiado();
+        this._avisoCopiado(btn);
       } catch (err) {
         window.prompt('Copia el enlace de la ficha:', url);
       }
     }
 
-    _avisoCopiado() {
-      const ok = this._root && this._root.querySelector('.m-share-ok');
+    // El aviso que está junto al botón pulsado (móvil o escritorio)
+    _avisoCopiado(btn) {
+      const ok = btn && btn.parentNode && btn.parentNode.querySelector('.share-ok');
       if (!ok) { return; }
       ok.textContent = 'Enlace copiado';
       ok.classList.add('on');
@@ -577,7 +619,7 @@
 
       const portada =
         '<header class="m-cover">' +
-          (p.fotoGeneral ? '<img class="m-cover-img" src="' + e(p.fotoGeneral) + '" alt="">' : '') +
+          (p.fotoGeneral ? '<img class="m-cover-img" src="' + e(p.fotoGeneral) + '"' + this._orig(p.fotoGeneralOrig) + ' alt="">' : '') +
           '<div class="m-veil"></div>' +
           (p.logoBlanco ? '<img class="m-logo" src="' + e(p.logoBlanco) + '" alt="Centrimerca">' : '') +
         '</header>';
@@ -585,15 +627,15 @@
       const identidad =
         '<div class="m-id">' +
           '<div class="m-id-row' + (p.imagen ? '' : ' sin-foto') + '">' +
-            (p.imagen ? '<img class="m-portrait" src="' + e(p.imagen) + '" alt="' + e(p.nombre) + '">' : '') +
+            (p.imagen ? '<img class="m-portrait" src="' + e(p.imagen) + '"' + this._orig(p.imagenOrig) + ' alt="' + e(p.nombre) + '">' : '') +
             this._htmlPill(p) +
           '</div>' +
           '<div class="m-nombre">' +
             // v1.0.2: «Compartir», arriba a la derecha del bloque del nombre
-            '<button type="button" class="m-share" aria-label="Compartir ficha" title="Compartir">' +
+            '<button type="button" class="share-btn m-share" aria-label="Compartir ficha" title="Compartir">' +
               svg('share', 20, 'currentColor', 1.8) +
             '</button>' +
-            '<span class="m-share-ok" role="status"></span>' +
+            '<span class="share-ok m-share-ok" role="status"></span>' +
             '<h1 class="m-name">' + e(p.nombre) + '</h1>' +
             (p.rol ? '<p class="m-role">' + e(p.rol) + '</p>' : '') +
           '</div>' +
@@ -671,13 +713,18 @@
 
       const izquierda =
         '<div class="d-left">' +
-          (p.fotoGeneral ? '<img class="d-cover-img" src="' + e(p.fotoGeneral) + '" alt="">' : '') +
+          (p.fotoGeneral ? '<img class="d-cover-img" src="' + e(p.fotoGeneral) + '"' + this._orig(p.fotoGeneralOrig) + ' alt="">' : '') +
           '<div class="d-veil"></div>' +
           (p.logoBlanco
             ? '<img class="d-logo" src="' + e(p.logoBlanco) + '" alt="Centrimerca">'
             : '<div class="d-logo-hueco"></div>') +
+          // v1.0.4: «Compartir» arriba a la derecha, a la altura del logo
+          '<button type="button" class="share-btn d-share" aria-label="Compartir ficha" title="Compartir">' +
+            svg('share', 20, 'currentColor', 1.8) +
+          '</button>' +
+          '<span class="share-ok d-share-ok" role="status"></span>' +
           '<div class="d-id">' +
-            (p.imagen ? '<img class="d-portrait" src="' + e(p.imagen) + '" alt="' + e(p.nombre) + '">' : '') +
+            (p.imagen ? '<img class="d-portrait" src="' + e(p.imagen) + '"' + this._orig(p.imagenOrig) + ' alt="' + e(p.nombre) + '">' : '') +
             this._htmlPill(p) +
             '<h1 class="d-name">' + e(p.nombre) + '</h1>' +
             (p.rol ? '<p class="d-role">' + e(p.rol) + '</p>' : '') +
