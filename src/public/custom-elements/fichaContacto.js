@@ -1,7 +1,26 @@
 /*
  * CENTRIMERCA — Ficha de Contacto · Custom Element
- * Archivo:  fichaContacto.js   ·   v1.0.0
+ * Archivo:  fichaContacto.js   ·   v1.0.2
  * Tag name: ficha-contacto      ·   Element ID esperado: #fichaContacto
+ *
+ * v1.0.2 — MÓVIL (incluye todo lo de v1.0.1):
+ *   - Esquinas redondeadas en la portada y en la banda de acciones:
+ *     10 % del ancho (min(10vw, 40px) → 39 px en un móvil de 390).
+ *   - Botón «Compartir» arriba a la derecha del bloque del nombre. Usa el
+ *     menú de compartir del móvil (navigator.share) con la URL de la ficha;
+ *     si no existe, copia el enlace y avisa «Enlace copiado».
+ *     Va a la altura del nombre para que la píldora del área (a la derecha
+ *     del retrato) no se corte.
+ *   CSS: .m-cover, .m-actions, .m-nombre, .m-share*. JS: _render (cablea el
+ *   botón), _htmlMovil (envuelve nombre y cargo en .m-nombre con el botón),
+ *   _compartir y _avisoCopiado (nuevos).
+ *   Escritorio sin cambios.
+ *
+ * v1.0.1 — ESCRITORIO más bajo (tarjeta ≈ 880 → ≈ 670 px a 1366 × 768).
+ *   CSS (solo clases .d-* y .d .*): menos aire vertical, casillas de acción
+ *   de 52 px, filas de contacto y tarjetas de enlace más compactas.
+ *   JS (solo _htmlEscritorio): «Guardar en contactos» pasa de la columna
+ *   derecha a la izquierda, bajo el cargo. Móvil sin cambios.
  *
  * NUEVO. Vive en la página dinámica de ítem de `equipo`. Recibe el payload del
  * Page Code por setAttribute('ficha', JSON.stringify(...)) y se pinta solo.
@@ -49,6 +68,7 @@
     pin: '<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>',
     userPlus: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/>',
     chevron: '<path d="m9 18 6-6-6-6"/>',
+    share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98"/><path d="m15.41 6.51-6.82 3.98"/>',
     sparkles: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/>',
     panel: '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
     external: '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>'
@@ -132,7 +152,7 @@
     .m{ display:block; position:relative; background:#F6FAF9; color:#00393C; }
     .d{ display:none; }
 
-    .m-cover{ position:relative; height:288px; overflow:hidden; background:#006166; }
+    .m-cover{ position:relative; height:288px; overflow:hidden; background:#006166; border-radius:min(10vw, 40px); }
     .m-cover-img{
       position:absolute; inset:0; width:100%; height:100%; display:block;
       object-fit:cover; object-position:center 62%;
@@ -148,6 +168,29 @@
     .m-id{ position:relative; padding:0 22px; display:flex; flex-direction:column; align-items:flex-start; }
     .m-id-row{ display:flex; align-items:flex-end; gap:14px; max-width:100%; margin-top:-66px; }
     .m-id-row.sin-foto{ margin-top:22px; }
+    /* Bloque del nombre (v1.0.2): deja sitio al botón «Compartir» a la derecha */
+    .m-nombre{ position:relative; align-self:stretch; margin-top:20px; padding-right:56px; }
+    .m-nombre .m-name{ margin-top:0; }
+
+    /* Botón «Compartir» (v1.0.2): arriba a la derecha del bloque del nombre */
+    .m-share{
+      position:absolute; top:-3px; right:0; z-index:2;
+      display:flex; align-items:center; justify-content:center;
+      width:44px; height:44px; padding:0; border:0; border-radius:50%;
+      background:#E1EFEE; color:#006166; cursor:pointer;
+      -webkit-tap-highlight-color:transparent;
+      transition:background .15s ease;
+    }
+    .m-share:hover{ background:#CFE5E3; }
+    .m-share:focus-visible{ outline:2px solid #E80A4D; outline-offset:2px; }
+    .m-share-ok{
+      position:absolute; top:48px; right:0; z-index:2;
+      padding:4px 10px; border-radius:999px;
+      background:#00393C; color:#FFFFFF;
+      font-size:12px; font-weight:600; white-space:nowrap;
+      opacity:0; pointer-events:none; transition:opacity .2s ease;
+    }
+    .m-share-ok.on{ opacity:1; }
     .m-portrait{
       flex:0 0 auto; display:block;
       width:132px; height:132px; border-radius:34px;
@@ -164,7 +207,7 @@
     }
     .m-role{ margin:10px 0 0; font-size:17px; line-height:1.35; font-weight:500; color:#24494B; }
 
-    .m-actions{ margin-top:28px; background:#006166; padding:22px 14px; }
+    .m-actions{ margin-top:28px; background:#006166; padding:22px 14px; border-radius:min(10vw, 40px); }
     .m-actions-grid{
       max-width:640px; margin:0 auto;
       display:grid; grid-template-columns:repeat(var(--n,5),minmax(0,1fr)); gap:6px;
@@ -218,7 +261,7 @@
       .d{ display:block; }
     }
 
-    .d{ background:#E6EFEE; padding:48px 24px; color:#00393C; }
+    .d{ background:#E6EFEE; padding:32px 24px; color:#00393C; }
     .d-card{
       max-width:1120px; margin:0 auto;
       display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
@@ -227,9 +270,9 @@
     }
 
     .d-left{
-      position:relative; min-height:640px;
+      position:relative; min-height:560px;
       display:flex; flex-direction:column; justify-content:space-between; gap:40px;
-      padding:30px 36px 38px; overflow:hidden; background:#006166;
+      padding:28px 36px 34px; overflow:hidden; background:#006166;
     }
     .d-cover-img{
       position:absolute; inset:0; width:100%; height:100%; display:block;
@@ -260,41 +303,44 @@
     .d-role{ margin:14px 0 0; font-size:20px; line-height:1.35; font-weight:500; color:rgba(255,255,255,0.93); }
 
     .d-right{
-      min-width:0; display:flex; flex-direction:column; gap:34px;
-      padding:44px clamp(28px,3.4vw,44px) 40px;
+      min-width:0; display:flex; flex-direction:column; gap:24px;
+      padding:36px clamp(28px,3.4vw,44px) 32px;
     }
     .d-actions{ display:grid; grid-template-columns:repeat(var(--n,5),minmax(0,1fr)); gap:10px; }
-    .d-act{ display:flex; flex-direction:column; align-items:center; gap:9px; color:#00393C; text-decoration:none; }
+    .d-act{ display:flex; flex-direction:column; align-items:center; gap:8px; color:#00393C; text-decoration:none; }
     .d-act-ico{
       display:flex; align-items:center; justify-content:center;
-      width:60px; height:60px; border-radius:20px; background:#006166;
+      width:52px; height:52px; border-radius:18px; background:#006166;
       transition:background .15s ease;
     }
     .d-act:hover .d-act-ico{ background:#00393C; }
     .d-act-lbl{ font-size:13px; font-weight:600; color:#00393C; }
 
-    .d .sec-h{ font-size:13px; }
+    .d .sec-h{ font-size:13px; margin-bottom:10px; }
     .d-txt{ margin:0; max-width:52ch; font-size:16.5px; line-height:1.55; color:#24494B; text-wrap:pretty; white-space:pre-line; }
 
     .d-row{
       display:flex; align-items:center; gap:14px;
-      min-height:44px; padding:12px 0;
+      min-height:44px; padding:8px 0;
       border-bottom:1px solid #DCEAE8; text-decoration:none;
     }
-    .d-row .row-ico{ width:40px; height:40px; border-radius:13px; }
+    .d-row .row-ico{ width:36px; height:36px; border-radius:12px; }
     .d-row .row-lbl{ flex:0 0 104px; }
     .d-row .row-val{ flex:1 1 auto; min-width:0; }
 
     .d .links{ gap:12px; }
-    .d .lk{ padding:18px 16px 18px 18px; }
-    .d .lk-ico{ width:42px; height:42px; border-radius:14px; }
-    .d .lk-t{ font-size:16px; }
-    .d .lk-d{ font-size:13.5px; }
+    .d .lk{ gap:10px; padding:14px 14px 14px 16px; }
+    .d .lk-ico{ width:36px; height:36px; border-radius:12px; }
+    .d .lk-t{ font-size:15.5px; }
+    .d .lk-d{ font-size:13px; }
+
+    /* «Guardar en contactos» en la columna izquierda, bajo el cargo */
+    .d-id .d-cta{ margin-top:24px; }
 
     .d-cta{
       align-self:flex-start;
       display:inline-flex; align-items:center; justify-content:center; gap:10px;
-      height:58px; padding:0 30px 0 26px; border-radius:999px;
+      height:54px; padding:0 30px 0 26px; border-radius:999px;
       background:#E80A4D; color:#FFFFFF; text-decoration:none;
       font-size:17px; font-weight:600; letter-spacing:.01em;
       transition:background .15s ease;
@@ -425,6 +471,50 @@
       }
 
       this._root.innerHTML = this._htmlMovil(p) + this._htmlEscritorio(p);
+
+      // v1.0.2: botón «Compartir» (móvil)
+      const share = this._root.querySelector('.m-share');
+      if (share) {
+        share.addEventListener('click', () => this._compartir());
+      }
+    }
+
+    // ── Compartir (v1.0.2) ──────────────────────────────────────────────────
+    // Menú de compartir del móvil con la URL de la ficha. Sin él (escritorio
+    // o navegador antiguo): copia el enlace y avisa.
+    async _compartir() {
+      const p = this._data || {};
+      const url = String(window.location.href).split('#')[0];
+      const titulo = (p.nombre ? p.nombre + ' · ' : '') + 'Centrimerca';
+
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: titulo, text: titulo, url: url });
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') { return; }   // lo canceló el usuario
+          console.warn('[ficha-contacto] share no disponible:', err && err.message);
+        }
+      }
+
+      try {
+        await navigator.clipboard.writeText(url);
+        this._avisoCopiado();
+      } catch (err) {
+        window.prompt('Copia el enlace de la ficha:', url);
+      }
+    }
+
+    _avisoCopiado() {
+      const ok = this._root && this._root.querySelector('.m-share-ok');
+      if (!ok) { return; }
+      ok.textContent = 'Enlace copiado';
+      ok.classList.add('on');
+      clearTimeout(this._copiadoTimer);
+      this._copiadoTimer = setTimeout(() => {
+        ok.classList.remove('on');
+        ok.textContent = '';
+      }, 1800);
     }
 
     // ── Datos derivados ─────────────────────────────────────────────────────
@@ -493,8 +583,15 @@
             (p.imagen ? '<img class="m-portrait" src="' + e(p.imagen) + '" alt="' + e(p.nombre) + '">' : '') +
             this._htmlPill(p) +
           '</div>' +
-          '<h1 class="m-name">' + e(p.nombre) + '</h1>' +
-          (p.rol ? '<p class="m-role">' + e(p.rol) + '</p>' : '') +
+          '<div class="m-nombre">' +
+            // v1.0.2: «Compartir», arriba a la derecha del bloque del nombre
+            '<button type="button" class="m-share" aria-label="Compartir ficha" title="Compartir">' +
+              svg('share', 20, 'currentColor', 1.8) +
+            '</button>' +
+            '<span class="m-share-ok" role="status"></span>' +
+            '<h1 class="m-name">' + e(p.nombre) + '</h1>' +
+            (p.rol ? '<p class="m-role">' + e(p.rol) + '</p>' : '') +
+          '</div>' +
         '</div>';
 
       const banda = acciones.length ? (
@@ -579,6 +676,13 @@
             this._htmlPill(p) +
             '<h1 class="d-name">' + e(p.nombre) + '</h1>' +
             (p.rol ? '<p class="d-role">' + e(p.rol) + '</p>' : '') +
+            // v1.0.1: «Guardar en contactos» aquí, bajo el cargo
+            (p.vcardHref ? (
+              '<a class="d-cta" href="' + e(p.vcardHref) + '">' +
+                svg('userPlus', 22, '#FFFFFF', 1.9) +
+                '<span class="cta-txt">Guardar en contactos</span>' +
+              '</a>'
+            ) : '') +
           '</div>' +
         '</div>';
 
@@ -626,14 +730,7 @@
       const enlaces = this._htmlEnlaces(p);
       if (enlaces) { bloques.push(enlaces); }
 
-      if (p.vcardHref) {
-        bloques.push(
-          '<a class="d-cta" href="' + e(p.vcardHref) + '">' +
-            svg('userPlus', 22, '#FFFFFF', 1.9) +
-            '<span class="cta-txt">Guardar en contactos</span>' +
-          '</a>'
-        );
-      }
+      // v1.0.1: «Guardar en contactos» se pinta en la columna izquierda.
 
       return (
         '<div class="d">' +
