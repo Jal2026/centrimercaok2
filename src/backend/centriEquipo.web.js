@@ -1,9 +1,35 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * CENTRIMERCA — Gestor de Equipo · Backend web module · v1.0.3
+ * CENTRIMERCA — Gestor de Equipo · Backend web module · v1.0.4
  * Ruta: backend/centriEquipo.web.js
  * FECHA: 14 Octubre 2026
  *
- * REQUIERE: GestorEquipo.page.js v1.0.3 + Gestor_Equipo_Centrimerca_v1_0_4.html
+ * REQUIERE: GestorEquipo.page.js v1.0.3 (sin cambios) + gestorequipo v1.0.5.html
+ *
+ * v1.0.4: ficha de contacto (centriFichaContacto.web.js + fichaContacto.js).
+ *   - Campos nuevos (esquema confirmado por Jal el 14/10): area, web,
+ *     direccion, slug, fotoAgenda, fotoGeneral.
+ *   - `area` es el ÁREA (píldora de la ficha y filtro del gestor).
+ *     `descripcion` pasa a ser el texto de PRESENTACIÓN de la ficha.
+ *   - guardarMiembro escribe area, web, direccion y fotoAgenda SOLO si
+ *     llegan en `datos` (un widget antiguo no los borra). Ya NO escribe
+ *     `vcard` ni genera el QR desde la vCard: el campo `vcard` (QR TIGER) se
+ *     conserva tal cual por READ-MERGE-UPDATE y deja de editarse.
+ *   - SLUG automático, nunca editable y nunca cambia una vez asignado. Se
+ *     asigna cuando la persona está VISIBLE (activo = true) y no tiene slug:
+ *     al abrir el gestor (filas existentes), al guardar y al marcar visible.
+ *     Así una copia «(copia)», que nace no visible, recibe su slug cuando
+ *     ya se ha renombrado y se publica. Colisiones: -2, -3…
+ *   - QR de la FICHA: https://www.centrimerca.com/equipo/<slug> con el
+ *     patrón de quickchart de siempre. Sustituye al QR generado (desde la
+ *     vCard o desde la ficha) cuando cambia el destino. Un QR SUBIDO a mano
+ *     no se toca nunca, salvo que se pida con datos.qrFicha === true
+ *     («Usar QR de la ficha» en el widget).
+ *   - uploadImagenMiembro acepta campo 'fotoGeneral'.
+ *   - duplicarMiembro copia area, web, direccion, fotoGeneral y fotoAgenda.
+ *     NO copia slug, qr ni vcard: los tres apuntan a la persona original.
+ *   - toggleMiembroActivo devuelve también `miembro` (slug/QR recién
+ *     asignados al hacerse visible).
+ *   - _mapMiembro devuelve los campos nuevos y fichaUrl.
  *
  * v1.0.3: visible / no visible y duplicar.
  *   - Campo `activo` (Booleano, verificado en el esquema el 14/10).
@@ -49,6 +75,8 @@
  * nombre (Texto) · rol (Texto) · descripcion (Texto plano) · imagen (Imagen)
  * email (Email, cifrado) · numeroTelefono (NÚMERO) · vcard (URL)
  * qr (Imagen; en los datos guarda una URL de quickchart.io)
+ * v1.0.4 (confirmados 14/10): area (TEXT) · web (URL) · direccion (TEXT)
+ * slug (TEXT) · fotoAgenda (TEXT: empleado|general) · fotoGeneral (IMAGE)
  * Orden: campo de orden manual de la colección (F.orden), claves de texto en
  *   alfabeto 0-9a-z que se comparan como texto ("0q" < "0qg" < "0r8" < "6").
  *   ⚠️ El key incluye un UUID propio de esta colección: si algún día se rehace
@@ -70,7 +98,7 @@ import wixData from 'wix-data';
 import { mediaManager } from 'wix-media-backend';
 import { currentMember } from 'wix-members-backend';
 
-const VERSION = '1.0.3';
+const VERSION = '1.0.4';
 const TAG = `[Equipo][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -94,15 +122,27 @@ const F = {
   vcard:       'vcard',           // "URL"
   qr:          'qr',              // "Imagen"; en los datos guarda URL de quickchart.io
   activo:      'activo',          // "Booleano": visible en la web
-  orden:       '_manualSort_70208d3c-3970-4f20-ac00-b50accefda3d'  // orden manual de la colección
+  orden:       '_manualSort_70208d3c-3970-4f20-ac00-b50accefda3d',  // orden manual de la colección
+  // v1.0.4 — ficha de contacto
+  area:        'area',            // "Texto": área (píldora de la ficha, filtro)
+  web:         'web',             // "URL"
+  direccion:   'direccion',       // "Texto"
+  slug:        'slug',            // "Texto": lo asigna el sistema, nunca cambia
+  fotoAgenda:  'fotoAgenda',      // "Texto": 'empleado' | 'general' (vacío = empleado)
+  fotoGeneral: 'fotoGeneral'      // "Imagen": portada de la ficha
 };
 
 // Campos de imagen que admite la subida.
-const CAMPOS_IMAGEN = { imagen: F.imagen, qr: F.qr };
+const CAMPOS_IMAGEN = { imagen: F.imagen, qr: F.qr, fotoGeneral: F.fotoGeneral };
 
 // ── Patrón del QR, copiado de los datos existentes ─────────────────────────
 const QR_BASE   = 'https://quickchart.io/qr?text=';
 const QR_PARAMS = '&size=300&margin=1&ecLevel=M&format=png';
+
+// ── Ficha de contacto (v1.0.4) ─────────────────────────────────────────────
+// Página dinámica de `equipo` con URL /equipo/{slug}. Es lo que codifica el QR.
+const FICHA_BASE  = 'https://www.centrimerca.com/equipo/';
+const FOTO_AGENDA = ['empleado', 'general'];
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONTROL DE ACCESO  (copia literal de centriActualidad.web.js v1.0.1)
@@ -194,10 +234,89 @@ function _imgUrl(uri) {
   return m ? ('https://static.wixstatic.com/media/' + m[1]) : '';
 }
 
-// QR con el mismo patrón que ya tienen las filas de `equipo`.
-function _qrDesdeVcard(vcard) {
-  const v = _txt(vcard);
-  return v ? (QR_BASE + encodeURIComponent(v) + QR_PARAMS) : '';
+// ── Ficha de contacto (v1.0.4) ─────────────────────────────────────────────
+// El QR deja de generarse desde la vCard (QR TIGER): ahora codifica la URL de
+// la ficha, con el mismo patrón de quickchart que ya tienen las filas.
+
+// Slug: minúsculas, sin tildes, guiones. Igual que centriFichaContacto.web.js.
+function _slugDe(nombre) {
+  return _txt(nombre)
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+// Slug único en la colección (sin contar la propia fila): base, base-2, base-3…
+function _slugUnico(base, filas, excluirId) {
+  const raiz = base || 'persona';
+  const usados = {};
+  (filas || []).forEach(f => {
+    if (excluirId && f._id === excluirId) { return; }
+    const s = _txt(f[F.slug]);
+    if (s) { usados[s] = true; }
+  });
+  if (!usados[raiz]) { return raiz; }
+  let n = 2;
+  while (usados[raiz + '-' + n]) { n++; }
+  return raiz + '-' + n;
+}
+
+function _fichaUrl(slug) {
+  const s = _txt(slug);
+  return s ? (FICHA_BASE + s) : '';
+}
+
+function _qrFicha(slug) {
+  const u = _fichaUrl(slug);
+  return u ? (QR_BASE + encodeURIComponent(u) + QR_PARAMS) : '';
+}
+
+// QR generado por el sistema (quickchart: desde la vCard antigua o desde la
+// ficha) o vacío → se puede sustituir. Un QR subido (wix:image://…) NO.
+function _qrEsGenerado(qr) {
+  const q = _txt(qr);
+  return !q || q.indexOf(QR_BASE) === 0;
+}
+
+/* Cambios para que una fila VISIBLE tenga su ficha publicable:
+   · slug, si no tiene (único; nunca se cambia uno existente)
+   · QR de la ficha, si el actual es generado y apunta a otro sitio
+     (forzarQr = true lo pone aunque el actual sea un QR subido a mano)
+   Fila no visible → {} (no se asigna nada). */
+function _cambiosFicha(fila, filas, forzarQr) {
+  const cambios = {};
+  if (fila[F.activo] !== true) { return cambios; }
+
+  let slug = _txt(fila[F.slug]);
+  if (!slug) {
+    slug = _slugUnico(_slugDe(fila[F.nombre]), filas, fila._id);
+    cambios[F.slug] = slug;
+  }
+
+  const qr = _qrFicha(slug);
+  if (qr && _txt(fila[F.qr]) !== qr && (forzarQr || _qrEsGenerado(fila[F.qr]))) {
+    cambios[F.qr] = qr;
+  }
+  return cambios;
+}
+
+// Al abrir el gestor: pone al día las filas visibles (slug + QR de la ficha).
+// Una por una (READ-MERGE-UPDATE con la fila leída). Un fallo en una fila no
+// impide cargar el gestor.
+async function _asegurarFichas(filas) {
+  for (const f of filas) {
+    const cambios = _cambiosFicha(f, filas, false);
+    if (!Object.keys(cambios).length) { continue; }
+    try {
+      await wixData.update(COL, Object.assign({}, f, cambios), AUTH);
+      Object.assign(f, cambios);
+      console.log(`${TAG} ficha al día ${f._id}: ${JSON.stringify(cambios)}`);
+    } catch (e) {
+      console.error(`${TAG} ❌ no pude poner al día la ficha ${f._id}:`, e.message);
+    }
+  }
+  return filas;
 }
 
 // `numeroTelefono` es de tipo Número: se aceptan cifras (y espacios/puntos/
@@ -300,7 +419,15 @@ function _mapMiembro(it) {
     vcard:       _txt(it[F.vcard]),
     qr:          _imgUrl(it[F.qr]),
     imagen:      _imgUrl(it[F.imagen]),
-    activo:      it[F.activo] === true
+    activo:      it[F.activo] === true,
+    // v1.0.4
+    area:        _txt(it[F.area]),
+    web:         _txt(it[F.web]),
+    direccion:   _txt(it[F.direccion]),
+    slug:        _txt(it[F.slug]),
+    fichaUrl:    _fichaUrl(it[F.slug]),
+    fotoAgenda:  _txt(it[F.fotoAgenda]) === 'general' ? 'general' : 'empleado',
+    fotoGeneral: _imgUrl(it[F.fotoGeneral])
   };
 }
 
@@ -314,7 +441,8 @@ export const listarEquipo = webMethod(
     if (!guard.ok) { return { ok: false, error: guard.error }; }
 
     try {
-      const filas = await _leerOrdenado();
+      // v1.0.4: las filas visibles reciben slug y QR de la ficha si les faltan.
+      const filas = await _asegurarFichas(await _leerOrdenado());
       const equipo = filas.map(_mapMiembro);
       console.log(`${TAG} listar: ${equipo.length} personas`);
       return { ok: true, equipo };
@@ -328,11 +456,12 @@ export const listarEquipo = webMethod(
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 2. GUARDAR PERSONA (alta o edición)
-// La foto NO se escribe aquí: se sube aparte (uploadImagenMiembro). En
-// edición se hace READ-MERGE-UPDATE para no pisar `imagen` ni otros campos.
-// `qr`: se genera desde la vCard en el alta, si datos.qrDesdeVcard === true,
-// o si cambia la vCard y el QR guardado era el generado de la anterior.
-// Un QR subido a mano (uploadImagenMiembro con campo 'qr') no se toca.
+// La foto, la foto general y el QR subido NO se escriben aquí: se suben
+// aparte (uploadImagenMiembro). En edición se hace READ-MERGE-UPDATE para no
+// pisar imágenes, `vcard` ni otros campos.
+// v1.0.4: `vcard` ya no se escribe ni genera QR. Si la persona queda VISIBLE,
+// _cambiosFicha le asigna slug (si no tiene) y el QR de la ficha (si el
+// actual es generado; con datos.qrFicha === true, aunque sea uno subido).
 // ═══════════════════════════════════════════════════════════════════════════
 export const guardarMiembro = webMethod(
   Permissions.SiteMember,
@@ -347,14 +476,20 @@ export const guardarMiembro = webMethod(
     const email = _txt(d.email);
     if (email && !_emailValido(email)) { return { ok: false, error: `Email no válido: ${email}` }; }
 
-    const vcard = _txt(d.vcard);
-    if (vcard && !_urlValida(vcard)) { return { ok: false, error: 'El enlace vCard debe empezar por http:// o https://' }; }
-
     const tel = _telefono(d.telefono);
     if (!tel.ok) { return { ok: false, error: tel.error }; }
 
-    const qrDesdeVcard = (d.qrDesdeVcard === true);
-    if (qrDesdeVcard && !vcard) { return { ok: false, error: 'Para generar el QR hace falta el enlace vCard.' }; }
+    // v1.0.4 — web: se admite sin protocolo (se antepone https://).
+    let web = _txt(d.web);
+    if (web && !/^https?:\/\//i.test(web)) { web = 'https://' + web; }
+    if (web && !_urlValida(web)) { return { ok: false, error: `Web no válida: ${web}` }; }
+
+    const fotoAgenda = _txt(d.fotoAgenda);
+    if (fotoAgenda && FOTO_AGENDA.indexOf(fotoAgenda) < 0) {
+      return { ok: false, error: 'Foto del contacto en la agenda: valor no válido.' };
+    }
+
+    const qrFicha = (d.qrFicha === true);
 
     try {
       const campos = {
@@ -363,31 +498,34 @@ export const guardarMiembro = webMethod(
         [F.descripcion]: _txt(d.descripcion),
         [F.email]:       email || null,
         [F.telefono]:    tel.valor,
-        [F.vcard]:       vcard || null,
         [F.activo]:      d.activo === true
       };
+      // v1.0.4 — solo si llegan: un widget antiguo no los borra.
+      if (d.area !== undefined)       { campos[F.area] = _txt(d.area) || null; }
+      if (d.web !== undefined)        { campos[F.web] = web || null; }
+      if (d.direccion !== undefined)  { campos[F.direccion] = _txt(d.direccion) || null; }
+      if (d.fotoAgenda !== undefined) { campos[F.fotoAgenda] = fotoAgenda || null; }
+
+      // Toda la colección: unicidad del slug y clave de orden de las altas.
+      const filas = await _leerOrdenado();
 
       let guardado;
       if (miembroId) {
         const actual = await wixData.get(COL, miembroId, AUTH);
         if (!actual) { return { ok: false, error: 'Persona no encontrada.' }; }
-        const vcardAnterior = _txt(actual[F.vcard]);
-        if (qrDesdeVcard) {
-          campos[F.qr] = _qrDesdeVcard(vcard);
-        } else if (vcard !== vcardAnterior && _txt(actual[F.qr]) === _qrDesdeVcard(vcardAnterior)) {
-          // El QR guardado es el generado de la vCard anterior → se mantiene al día.
-          campos[F.qr] = _qrDesdeVcard(vcard) || null;
-        }
-        guardado = await wixData.update(COL, Object.assign({}, actual, campos), AUTH);
+        const fila = Object.assign({}, actual, campos);
+        Object.assign(fila, _cambiosFicha(fila, filas, qrFicha));
+        guardado = await wixData.update(COL, fila, AUTH);
       } else {
-        campos[F.qr] = _qrDesdeVcard(vcard) || null;
+        const fila = Object.assign({}, campos);
         // Alta: entra al final de la lista.
         try {
-          campos[F.orden] = _claveAlFinal(await _leerOrdenado());
+          fila[F.orden] = _claveAlFinal(filas);
         } catch (eOrden) {
           console.warn(`${TAG} alta sin clave de orden (se asignará al mover):`, eOrden.message);
         }
-        guardado = await wixData.insert(COL, campos, AUTH);
+        Object.assign(fila, _cambiosFicha(fila, filas, qrFicha));
+        guardado = await wixData.insert(COL, fila, AUTH);
       }
 
       console.log(`${TAG} ✅ persona ${miembroId ? 'actualizada' : 'creada'}: ${guardado._id}`);
@@ -456,6 +594,8 @@ export const moverMiembro = webMethod(
 // ═══════════════════════════════════════════════════════════════════════════
 // 2c. VISIBLE / NO VISIBLE  (READ-MERGE-UPDATE de `activo`)
 // Mismo patrón que toggleNoticiaCampo (centriActualidad.web.js).
+// v1.0.4: al hacerse visible recibe slug y QR de la ficha si le faltan, y se
+// devuelve también `miembro` para que el widget los muestre.
 // ═══════════════════════════════════════════════════════════════════════════
 export const toggleMiembroActivo = webMethod(
   Permissions.SiteMember,
@@ -469,10 +609,14 @@ export const toggleMiembroActivo = webMethod(
       if (!actual) { return { ok: false, error: 'Persona no encontrada.' }; }
 
       const nuevoValor = (valor === true || valor === 'true');
-      await wixData.update(COL, Object.assign({}, actual, { [F.activo]: nuevoValor }), AUTH);
+      const fila = Object.assign({}, actual, { [F.activo]: nuevoValor });
+      if (nuevoValor) {
+        Object.assign(fila, _cambiosFicha(fila, await _leerOrdenado(), false));
+      }
+      const guardado = await wixData.update(COL, fila, AUTH);
 
       console.log(`${TAG} ✅ activo ${miembroId}: ${nuevoValor}`);
-      return { ok: true, id: miembroId, valor: nuevoValor };
+      return { ok: true, id: miembroId, valor: nuevoValor, miembro: _mapMiembro(guardado) };
 
     } catch (e) {
       console.error(`${TAG} ❌ toggleMiembroActivo:`, e.message);
@@ -487,8 +631,14 @@ export const toggleMiembroActivo = webMethod(
 // así no se copian _id, la clave de orden, enlaces de página ni campos sueltos.
 // La copia nace NO visible, con nombre + " (copia)", justo debajo del original.
 // Devuelve la copia y la lista completa en el orden nuevo.
+// v1.0.4: + area, web, direccion, fotoGeneral, fotoAgenda. Fuera vcard y qr:
+// igual que el slug, apuntan a la persona original. La copia recibe slug y QR
+// propios cuando se publica (visible).
 // ═══════════════════════════════════════════════════════════════════════════
-const CAMPOS_DUPLICABLES = [F.rol, F.descripcion, F.imagen, F.email, F.telefono, F.vcard, F.qr];
+const CAMPOS_DUPLICABLES = [
+  F.rol, F.descripcion, F.imagen, F.email, F.telefono,
+  F.area, F.web, F.direccion, F.fotoGeneral, F.fotoAgenda
+];
 
 export const duplicarMiembro = webMethod(
   Permissions.SiteMember,
@@ -560,7 +710,7 @@ export const eliminarMiembro = webMethod(
 // 4. SUBIR FOTO O QR DE PERSONA
 // Patrón literal de uploadImagenNoticia (centriActualidad.web.js):
 // mediaManager.upload → fileUrl → READ-MERGE-UPDATE del campo pedido.
-// campo: 'imagen' (por defecto) | 'qr'.
+// campo: 'imagen' (por defecto) | 'qr' | 'fotoGeneral' (v1.0.4).
 // ═══════════════════════════════════════════════════════════════════════════
 export const uploadImagenMiembro = webMethod(
   Permissions.SiteMember,
