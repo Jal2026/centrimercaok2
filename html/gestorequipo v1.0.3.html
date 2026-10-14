@@ -1,0 +1,1019 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>CENTRIMERCA · Gestor de equipo</title>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     CENTRIMERCA — Gestor de equipo · v1.0.3 · 13 Oct 2026
+
+     REQUIERE: centriEquipo.web.js v1.0.3 + GestorEquipo.page.js v1.0.3
+     ELEMENTO:  #htmlEquipoCentri (HtmlComponent)   ← confirma el Element ID
+
+     v1.0.4: (versión 14 Oct 2026)
+       - Visible / no visible (campo `activo`): círculo en cada fila (se guarda
+         al momento) e interruptor «Visible en la web» en la ficha. Las altas
+         nacen no visibles salvo que se marque.
+       - Duplicar ficha: copia debajo del original, NO visible, «(copia)».
+       - Filtro por Área (campo `descripcion`, rotulado «Área»). Los valores
+         del filtro salen de los datos. La ficha sugiere las áreas existentes.
+       - Con búsqueda o filtro activos no se reordena.
+
+     v1.0.3: «Generar QR desde la vCard» muestra el QR al momento (nunca un
+       recuadro vacío). Si se edita la vCard después, la vista previa sigue
+       al enlace. Solo widget: backend y page code sin cambios.
+
+     v1.0.2: el ORDEN se edita aquí: arrastrar una fila o ▲▼. Se guarda al
+       momento (moveMiembro) y es el orden de la web. Un movimiento cada vez
+       (cada uno calcula su posición con las claves frescas de los vecinos).
+       Con la búsqueda activa no se reordena. Textos de la interfaz sin
+       referencias a la plataforma.
+
+     v1.0.1: el QR se cambia desde el gestor.
+       - «Subir QR…», o pulsar/arrastrar sobre el recuadro del QR: sube una
+         imagen propia (se sube al guardar, como la foto).
+       - «Generar QR desde la vCard»: lo genera el backend al guardar.
+       - Las subidas (foto y QR) van EN SERIE: cada una hace READ-MERGE-UPDATE
+         de la fila entera y, en paralelo, la segunda pisaría a la primera.
+
+     ⚠️ ES UN IFRAME. Habla por postMessage, no por atributos. La consola
+        CENTRI usa el otro mecanismo. No mezclar los patrones.
+
+     ⚠️ EL ACCESO NO LO DECIDE ESTE ARCHIVO. Lo decide _exigirAdmin() en el
+        backend contra CentriAdmins.
+
+     DISEÑO Y CABLEADO: los del Editor de actualidad v1.0.3 (paleta #006166,
+     Bai Jamjuree, secciones .sec, filas .res-item, toasts, gate, resize),
+     sin texto enriquecido ni etiquetas: `descripcion` de equipo es texto plano.
+
+     COLECCIÓN: equipo  (field keys leídos del esquema real)
+     CAMPOS:  nombre · rol · descripcion (texto) · imagen (imagen)
+              email (email) · numeroTelefono (NÚMERO) · vcard (url)
+              qr (imagen; se sube o se genera desde la vCard)
+
+     ORDEN: el de la lista es el de la web; se cambia en este gestor.
+     ═══════════════════════════════════════════════════════════════════════ -->
+
+<link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f2f5f4;--panel:#fff;--panel2:#f7faf9;--panel3:#e9efee;
+  --line:#dde6e5;--line2:#cbd8d7;--line3:#b6c7c6;
+  --fg:#12201f;--fg2:#3a4b49;--muted:#6b7a78;--muted2:#9aa8a6;
+  --accent:#006166;--accent2:#00494d;
+  --accent-dim:rgba(0,97,102,.06);--accent-light:rgba(0,97,102,.14);
+  --hi:#b8632a;--hi-dim:rgba(184,99,42,.08);--hi-light:rgba(184,99,42,.16);
+  --green:#2b7a4b;--red:#c0504d;--amber:#a8790f;
+  --font:'Bai Jamjuree',sans-serif;--shadow:0 1px 4px rgba(0,0,0,.06);--r:8px
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--fg);font-family:var(--font);font-size:13px;line-height:1.5}
+.shell{display:flex;flex-direction:column;min-height:100vh}
+
+.hd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel);border-top:3px solid var(--accent);flex-wrap:wrap}
+.hd-title{font-size:15px;font-weight:700;color:var(--accent)}
+.hd-sep{color:var(--muted2)}.hd-sub{font-size:12px;color:var(--fg2)}
+
+.status-bar{display:flex;gap:14px;padding:7px 16px;background:var(--accent-dim);border-bottom:1px solid var(--accent-light);font-size:11px;color:var(--accent);flex-wrap:wrap}
+.sb-item{display:flex;align-items:center;gap:5px}
+.sb-dot{width:5px;height:5px;border-radius:50%;background:var(--hi);opacity:.9}
+
+.body{flex:1;padding:16px;display:flex;flex-direction:column;gap:14px}
+/* Columna izquierda para elegir, derecha grande para editar. */
+.split{display:grid;grid-template-columns:minmax(320px,.85fr) minmax(480px,1.3fr);gap:14px;align-items:start}
+@media (max-width:1000px){.split{grid-template-columns:1fr}}
+.split>*{min-width:0}
+.fld{min-width:0}
+.row2>*{min-width:0}
+textarea,select,input[type="text"],input[type="email"],input[type="tel"],input[type="url"]{min-width:0;max-width:100%}
+@media (max-width:620px){
+  .body{padding:10px;gap:10px}
+  .sec{padding:11px}
+  .hd{padding:10px 11px}
+  .status-bar{padding:7px 11px;gap:9px}
+  .ft{padding:10px 11px}
+}
+
+.sec{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;box-shadow:var(--shadow)}
+.sec h3{font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.8px;margin:0 0 4px}
+.sec .hint{font-size:11px;color:var(--muted);margin:0 0 10px;line-height:1.45}
+
+textarea,select,input[type="text"],input[type="email"],input[type="tel"],input[type="url"]{width:100%;background:var(--panel2);color:var(--fg);border:1px solid var(--line2);border-radius:var(--r);padding:9px 11px;font-family:var(--font);font-size:13px;outline:none;resize:vertical;transition:border-color .2s}
+textarea:focus,select:focus,input:focus{border-color:var(--accent)}
+textarea::placeholder,input::placeholder{color:var(--muted2)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:620px){.row2{grid-template-columns:1fr}}
+.fld{margin-bottom:14px}
+.fld label{display:block;font-size:11px;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.4px}
+.spacer{flex:1}
+
+/* ── Campos grandes ───────────────────────────────────────────────────── */
+.fld-nombre input[type="text"]{font-size:18px;font-weight:600;padding:13px 15px;line-height:1.35}
+.fld-rol input[type="text"]{font-size:15px;padding:11px 13px}
+
+/* ── Ficha: foto + datos ──────────────────────────────────────────────── */
+.ficha{display:grid;grid-template-columns:220px 1fr;gap:16px;align-items:start}
+@media (max-width:620px){.ficha{grid-template-columns:1fr}}
+.ficha>*{min-width:0}
+
+/* ── Foto (retrato 3:4) ───────────────────────────────────────────────── */
+.imgbig{width:100%;max-width:260px;border:1.5px dashed var(--line3);border-radius:var(--r);background:var(--panel3);overflow:hidden;cursor:pointer;transition:border-color .2s,background .2s}
+.imgbig:hover{border-color:var(--accent)}
+.imgbig.dragging{border-color:var(--accent);background:var(--accent-dim)}
+.imgbig img{width:100%;aspect-ratio:3/4;object-fit:cover;object-position:top;display:block}
+.imgbig .ph{width:100%;aspect-ratio:3/4;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--muted2);font-size:12.5px;text-align:center;padding:16px}
+.imgbig .ph .ic{font-size:34px;opacity:.7}
+.img-actions{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
+
+/* ── vCard + QR ───────────────────────────────────────────────────────── */
+.qrrow{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+.qrrow .qr-main{flex:1;min-width:220px}
+.qrbox{width:124px;flex:none;text-align:center}
+.qrbox img{width:124px;height:124px;border:1px solid var(--line2);border-radius:6px;background:#fff;display:block}
+.qrbox .ph{width:124px;height:124px;border:1px dashed var(--line3);border-radius:6px;background:var(--panel3);display:flex;align-items:center;justify-content:center;color:var(--muted2);font-size:11px;padding:8px}
+.qrbox small{display:block;color:var(--muted);font-size:10.5px;margin-top:4px}
+.qrdrop{cursor:pointer}
+.qrdrop img,.qrdrop .ph{transition:border-color .2s,background .2s}
+.qrdrop:hover img,.qrdrop:hover .ph{border-color:var(--accent)}
+.qrdrop.dragging img,.qrdrop.dragging .ph{border-color:var(--accent);background:var(--accent-dim)}
+.link{color:var(--accent);font-size:12px;text-decoration:none;font-weight:600}
+.link:hover{text-decoration:underline}
+
+.btn{padding:11px 18px;border:1px solid var(--accent);border-radius:var(--r);background:var(--accent);color:#fff;font-family:var(--font);font-size:14px;font-weight:600;cursor:pointer;transition:background .15s}
+.btn:hover:not(:disabled){background:var(--accent2)}
+.btn:disabled{opacity:.5;cursor:default}
+.btn-2{background:var(--panel2);color:var(--fg2);border-color:var(--line2)}
+.btn-2:hover:not(:disabled){background:var(--panel3)}
+.btn-sm{padding:8px 13px;font-size:12.5px}
+.btn-danger{background:var(--panel2);color:var(--red);border-color:var(--line2)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
+
+/* ── Listado ──────────────────────────────────────────────────────────── */
+.lista{max-height:74vh;min-height:320px;overflow-y:auto;padding-right:2px}
+.res-item{display:flex;align-items:center;gap:11px;padding:9px 11px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel2);margin-bottom:6px;cursor:pointer}
+.res-item:hover{border-color:var(--line3)}
+.res-item.sel{border-color:var(--accent);background:var(--accent-dim)}
+.res-thumb{width:48px;height:48px;border-radius:50%;object-fit:cover;object-position:top;background:var(--panel3);flex:none}
+.res-thumb.ph{display:flex;align-items:center;justify-content:center;font-size:17px;color:var(--muted2)}
+.res-main{flex:1;min-width:0}
+.res-title{font-size:14px;color:var(--fg);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.res-sub{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
+.res-pos{flex:none;font-size:11px;color:var(--muted2);font-weight:600;min-width:20px;text-align:right}
+.res-move{display:flex;flex-direction:column;gap:3px;flex:none}
+.mv{width:26px;height:22px;border:1px solid var(--line2);background:var(--panel);border-radius:5px;font-size:10px;line-height:1;color:var(--fg2);cursor:pointer;font-family:var(--font);transition:border-color .15s,color .15s}
+.mv:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.mv:disabled{opacity:.3;cursor:default}
+.res-item[draggable="true"]{cursor:grab}
+.res-item.dragging{opacity:.45}
+.res-item.drop-before{box-shadow:inset 0 3px 0 var(--accent)}
+.res-item.drop-after{box-shadow:inset 0 -3px 0 var(--accent)}
+.lista.ocupada .mv{pointer-events:none;opacity:.3}
+.res-empty{padding:16px;text-align:center;color:var(--muted);font-size:12px}
+/* ── Visible / no visible (mismo círculo que el editor de actualidad) ── */
+.flag{width:27px;height:27px;border-radius:50%;border:1px solid var(--line2);background:var(--panel);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;cursor:pointer;color:var(--muted2);flex:none}
+.flag.on-act{background:rgba(43,122,75,.1);border-color:rgba(43,122,75,.3);color:var(--green)}
+.res-item.oculta .res-thumb,.res-item.oculta .res-main{opacity:.5}
+/* ── Búsqueda + filtro de área ─────────────────────────────────────────── */
+.filtros{display:grid;grid-template-columns:1fr 200px;gap:8px;margin-bottom:10px}
+@media (max-width:620px){.filtros{grid-template-columns:1fr}}
+.filtros>*{min-width:0}
+/* ── Interruptor de la ficha ──────────────────────────────────────────── */
+.switch{display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel2);cursor:pointer;transition:border-color .15s,background .15s;max-width:340px}
+.switch:hover{border-color:var(--line3)}
+.switch.on{border-color:rgba(43,122,75,.3);background:rgba(43,122,75,.06)}
+.switch input{width:18px;height:18px;flex:none;margin-top:1px;accent-color:var(--green);cursor:pointer}
+.switch .sw-txt{font-size:13px;color:var(--fg2)}
+.switch .sw-txt b{display:block;color:var(--fg);font-weight:600;font-size:13.5px}
+.switch .sw-txt small{display:block;color:var(--muted);font-size:11px;margin-top:2px;line-height:1.35}
+
+.ft{padding:10px 16px;border-top:1px solid var(--line);background:var(--panel);font-size:11px;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap}
+#toast{display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--fg);color:#fff;padding:9px 16px;border-radius:var(--r);font-size:12.5px;z-index:99;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+.gate{display:none;margin:16px;padding:14px;border:1px solid var(--red);border-radius:var(--r);background:rgba(192,80,77,.06);color:var(--red);font-size:13px;line-height:1.55}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <div class="hd">
+    <span class="hd-title">CENTRIMERCA</span>
+    <span class="hd-sep">·</span>
+    <span class="hd-sub">Equipo</span>
+  </div>
+
+  <div class="status-bar">
+    <span class="sb-item"><span class="sb-dot"></span><span id="sbEstado">Cargando…</span></span>
+    <span class="sb-item"><span class="sb-dot"></span><span id="sbTotal">— personas</span></span>
+    <span class="sb-item"><span class="sb-dot"></span><span id="sbVisibles">— visibles</span></span>
+    <span class="sb-item"><span class="sb-dot"></span><span id="sbRoles">— roles</span></span>
+  </div>
+
+  <div class="gate" id="gate"></div>
+
+  <div class="body" id="mainBody">
+    <div class="split">
+
+      <!-- Columna izquierda: listado -->
+      <div class="sec">
+        <h3>Equipo</h3>
+        <p class="hint" id="hintOrden">Mismo orden que en la web. Arrastra una fila o usa ▲▼ para moverla; se guarda al momento.</p>
+
+        <div class="filtros">
+          <input type="text" id="busca" placeholder="Buscar por nombre o rol…">
+          <select id="filtroArea" title="Filtrar por área"><option value="">Todas las áreas</option></select>
+        </div>
+
+        <div class="lista" id="listaEquipo"></div>
+
+        <div class="actions">
+          <button class="btn btn-sm" id="btnNueva">+ Nueva persona</button>
+          <span class="spacer"></span>
+          <span class="hint" id="listaCuenta" style="margin:0"></span>
+        </div>
+      </div>
+
+      <!-- Columna derecha: ficha -->
+      <div class="sec" id="editor">
+        <h3 id="editorTitulo">Ficha</h3>
+        <p class="hint" id="editorHint">Elige una persona de la lista o crea una nueva.</p>
+        <div id="editorBody"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="ft">
+    <span>Gestor de equipo v1.0.4</span>
+    <span>Colección: equipo</span>
+  </div>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ═════════════════════════════════════════════════════════════════════════
+ * ESTADO
+ * ═════════════════════════════════════════════════════════════════════════ */
+var MAX_IMG = 3 * 1024 * 1024;   // 3 MB — igual que el editor de actualidad/catálogo
+
+var EQ = { miembros: [] };       // en el orden que entrega el backend (orden de la web)
+var moviendo = false;            // hay un cambio de orden en vuelo
+var antesDeMover = null;         // copia para deshacer si el backend falla
+var arrastrandoId = '';          // fila que se arrastra
+var busca    = '';
+var filtroArea = '';             // área elegida en el filtro ('' = todas)
+var duplicando = false;          // hay un duplicado en vuelo
+var selId    = '';               // id de la persona seleccionada ('nueva' = alta)
+var borrador = null;             // copia editable de la persona seleccionada
+var imgPend  = null;             // { base64, fileName, mimeType } a subir tras guardar
+var qrPend   = null;             // ídem para el QR
+var colaSubidas = [];            // subidas pendientes tras guardar, de una en una
+
+var $ = function(id){ return document.getElementById(id); };
+
+// Mismo patrón que el backend (centriEquipo.web.js · _qrDesdeVcard), solo
+// para la vista previa. Lo que se guarda lo calcula el backend.
+var QR_BASE   = 'https://quickchart.io/qr?text=';
+var QR_PARAMS = '&size=300&margin=1&ecLevel=M&format=png';
+function qrDesdeVcard(v){
+  v = String(v==null?'':v).trim();
+  return v ? (QR_BASE + encodeURIComponent(v) + QR_PARAMS) : '';
+}
+
+function toast(msg, ms){
+  var t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  setTimeout(function(){ t.style.display = 'none'; }, ms || 2600);
+}
+
+function send(type, data){
+  parent.postMessage(Object.assign({type:type}, data || {}), '*');
+}
+
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+function miembroPorId(id){
+  for (var i=0;i<EQ.miembros.length;i++){ if(EQ.miembros[i].id===id) return EQ.miembros[i]; }
+  return null;
+}
+
+// Roles distintos SACADOS DE LOS DATOS (sugerencias del campo Rol).
+function rolesExistentes(){
+  var set = {}; var out = [];
+  for (var i=0;i<EQ.miembros.length;i++){
+    var r = String(EQ.miembros[i].rol==null?'':EQ.miembros[i].rol).trim();
+    if (!r) continue;
+    var k = r.toLowerCase();
+    if (!set[k]){ set[k]=1; out.push(r); }
+  }
+  out.sort(function(a,b){ return a.localeCompare(b,'es'); });
+  return out;
+}
+
+// Áreas (campo `descripcion`) distintas SACADAS DE LOS DATOS, tal cual están
+// escritas (sin espacios a los lados). Alimentan el filtro y las sugerencias.
+function areaDe(m){ return String(m && m.descripcion != null ? m.descripcion : '').trim(); }
+
+function areasExistentes(){
+  var set = {}; var out = [];
+  for (var i=0;i<EQ.miembros.length;i++){
+    var a = areaDe(EQ.miembros[i]);
+    if (!a || set[a]) continue;
+    set[a] = 1; out.push(a);
+  }
+  out.sort(function(a,b){ return a.localeCompare(b,'es'); });
+  return out;
+}
+
+// Rellena el desplegable de áreas conservando la elegida (si sigue existiendo).
+function renderFiltroArea(){
+  var sel = $('filtroArea');
+  if (!sel) return;
+  var areas = areasExistentes();
+  if (filtroArea && areas.indexOf(filtroArea) < 0) filtroArea = '';
+  var html = '<option value="">Todas las áreas</option>';
+  for (var i=0;i<areas.length;i++){
+    var n = 0;
+    for (var k=0;k<EQ.miembros.length;k++){ if (areaDe(EQ.miembros[k])===areas[i]) n++; }
+    html += '<option value="'+esc(areas[i])+'"'+(areas[i]===filtroArea?' selected':'')+'>'+esc(areas[i])+' ('+n+')</option>';
+  }
+  sel.innerHTML = html;
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * RENDER — CABECERA
+ * ═════════════════════════════════════════════════════════════════════════ */
+function renderStatus(){
+  var n = EQ.miembros.length;
+  var r = rolesExistentes().length;
+  var v = EQ.miembros.filter(function(m){ return m.activo; }).length;
+  $('sbTotal').textContent = n + ' persona' + (n===1?'':'s');
+  $('sbVisibles').textContent = v + ' visible' + (v===1?'':'s') + ' en la web';
+  $('sbRoles').textContent = r + ' rol' + (r===1?'':'es');
+  renderFiltroArea();
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * RENDER — LISTADO
+ * ═════════════════════════════════════════════════════════════════════════ */
+function miembrosFiltrados(){
+  var out = [];
+  for (var i=0;i<EQ.miembros.length;i++){
+    var m = EQ.miembros[i];
+    if (busca && ((m.nombre||'') + ' ' + (m.rol||'')).toLowerCase().indexOf(busca) < 0) continue;
+    if (filtroArea && areaDe(m) !== filtroArea) continue;
+    out.push({ m:m, pos:i+1 });
+  }
+  return out;
+}
+
+function renderLista(){
+  var items = miembrosFiltrados();
+  var cont = $('listaEquipo');
+
+  if (!items.length){
+    cont.innerHTML = '<div class="res-empty">' + (EQ.miembros.length ? 'Nadie coincide con la búsqueda o el filtro.' : 'La colección está vacía.') + '</div>';
+    $('listaCuenta').textContent = '';
+    return;
+  }
+
+  // Reordenar solo con la lista completa (sin búsqueda ni filtro): así los vecinos son reales.
+  var ordenable = !busca && !filtroArea;
+  $('hintOrden').textContent = ordenable
+    ? 'Mismo orden que en la web. Arrastra una fila o usa ▲▼ para moverla; se guarda al momento. ● = visible en la web.'
+    : 'Mismo orden que en la web. Para cambiar el orden, quita la búsqueda y el filtro. ● = visible en la web.';
+  cont.classList.toggle('ocupada', moviendo);
+
+  var total = EQ.miembros.length;
+  var html = '';
+  for (var i=0;i<items.length;i++){
+    var m = items[i].m;
+    var pos = items[i].pos;
+    var sub = [];
+    if (m.rol) sub.push(m.rol);
+    if (m.telefono) sub.push(m.telefono);
+    if (!m.activo) sub.push('no visible');
+
+    html += '<div class="res-item'+(m.id===selId?' sel':'')+(m.activo?'':' oculta')+'" data-id="'+esc(m.id)+'"'+(ordenable?' draggable="true"':'')+'>' +
+      (m.imagen
+        ? '<img class="res-thumb" src="'+esc(m.imagen)+'" loading="lazy" alt="" draggable="false">'
+        : '<div class="res-thumb ph">👤</div>') +
+      '<div class="res-main">' +
+        '<div class="res-title">'+esc(m.nombre || '(sin nombre)')+'</div>' +
+        '<div class="res-sub">'+esc(sub.join(' · '))+'</div>' +
+      '</div>' +
+      '<div class="flag'+(m.activo?' on-act':'')+'" data-flag="activo" data-id="'+esc(m.id)+'" title="'+(m.activo?'Visible en la web — pulsa para ocultar':'No visible — pulsa para mostrar en la web')+'">'+(m.activo?'●':'○')+'</div>' +
+      '<span class="res-pos" title="Posición en la web">'+pos+'</span>' +
+      (ordenable
+        ? '<div class="res-move">' +
+            '<button type="button" class="mv" data-mv="-1" data-id="'+esc(m.id)+'" title="Subir"'+(pos===1?' disabled':'')+'>▲</button>' +
+            '<button type="button" class="mv" data-mv="1" data-id="'+esc(m.id)+'" title="Bajar"'+(pos===total?' disabled':'')+'>▼</button>' +
+          '</div>'
+        : '') +
+    '</div>';
+  }
+  cont.innerHTML = html;
+
+  cont.querySelectorAll('.res-item').forEach(function(el){
+    el.addEventListener('click', function(){ abrirMiembro(this.dataset.id); });
+    if (ordenable) cablearArrastre(el);
+  });
+  cont.querySelectorAll('.mv').forEach(function(el){
+    el.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      moverPaso(this.dataset.id, Number(this.dataset.mv));
+    });
+  });
+  cont.querySelectorAll('.flag[data-flag]').forEach(function(el){
+    el.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      var m = miembroPorId(this.dataset.id);
+      if (!m) return;
+      send('toggleMiembro', { miembroId: m.id, valor: !m.activo });
+    });
+  });
+
+  $('listaCuenta').textContent = items.length + ' persona' + (items.length===1?'':'s');
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * ORDEN — arrastrar o ▲▼. Se guarda al momento, un movimiento cada vez.
+ * ═════════════════════════════════════════════════════════════════════════ */
+function indicePorId(id){
+  for (var i=0;i<EQ.miembros.length;i++){ if (EQ.miembros[i].id===id) return i; }
+  return -1;
+}
+
+function limpiarMarcasArrastre(){
+  document.querySelectorAll('.res-item.drop-before,.res-item.drop-after,.res-item.dragging').forEach(function(x){
+    x.classList.remove('drop-before','drop-after','dragging');
+  });
+}
+
+function cablearArrastre(el){
+  el.addEventListener('dragstart', function(e){
+    if (moviendo){ e.preventDefault(); toast('Guardando el orden…'); return; }
+    arrastrandoId = this.dataset.id;
+    this.classList.add('dragging');
+    try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', arrastrandoId); } catch (err) {}
+  });
+  el.addEventListener('dragover', function(e){
+    if (!arrastrandoId || this.dataset.id===arrastrandoId) return;
+    e.preventDefault();
+    var r = this.getBoundingClientRect();
+    var antes = (e.clientY - r.top) < r.height/2;
+    this.classList.toggle('drop-before', antes);
+    this.classList.toggle('drop-after', !antes);
+  });
+  el.addEventListener('dragleave', function(){
+    this.classList.remove('drop-before','drop-after');
+  });
+  el.addEventListener('drop', function(e){
+    e.preventDefault();
+    var r = this.getBoundingClientRect();
+    var antes = (e.clientY - r.top) < r.height/2;
+    var id = arrastrandoId;
+    arrastrandoId = '';
+    limpiarMarcasArrastre();
+    if (id && id !== this.dataset.id) moverJunto(id, this.dataset.id, antes);
+  });
+  el.addEventListener('dragend', function(){
+    arrastrandoId = '';
+    limpiarMarcasArrastre();
+  });
+}
+
+// ▲ (-1) / ▼ (+1)
+function moverPaso(id, delta){
+  var from = indicePorId(id);
+  var to = from + delta;
+  if (from < 0 || to < 0 || to >= EQ.miembros.length) return;
+  var arr = EQ.miembros.slice();
+  var m = arr.splice(from, 1)[0];
+  arr.splice(to, 0, m);
+  aplicarOrden(arr, id);
+}
+
+// Soltar `id` antes o después de `destinoId`.
+function moverJunto(id, destinoId, antes){
+  var arr = EQ.miembros.slice();
+  var from = indicePorId(id);
+  if (from < 0) return;
+  var m = arr.splice(from, 1)[0];
+  var t = -1;
+  for (var i=0;i<arr.length;i++){ if (arr[i].id===destinoId){ t = i; break; } }
+  if (t < 0) return;
+  arr.splice(antes ? t : t+1, 0, m);
+  aplicarOrden(arr, id);
+}
+
+// Pinta el orden nuevo al momento y lo guarda. Solo repinta la lista: la
+// ficha abierta (con lo que se esté escribiendo) no se toca.
+function aplicarOrden(arr, id){
+  if (moviendo){ toast('Guardando el orden…'); return; }
+  var i = -1;
+  for (var k=0;k<arr.length;k++){ if (arr[k].id===id){ i = k; break; } }
+  if (i < 0 || i === indicePorId(id)) return;   // no ha cambiado de sitio
+
+  antesDeMover = EQ.miembros;
+  EQ.miembros = arr;
+  moviendo = true;
+  renderLista();
+  send('moveMiembro', {
+    miembroId: id,
+    prevId: i > 0 ? arr[i-1].id : '',
+    nextId: i < arr.length-1 ? arr[i+1].id : ''
+  });
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * RENDER — FICHA
+ * ═════════════════════════════════════════════════════════════════════════ */
+function abrirMiembro(id){
+  selId = id;
+  imgPend = null;
+  qrPend = null;
+  var m = miembroPorId(id);
+  borrador = m ? JSON.parse(JSON.stringify(m)) : null;
+  render();
+}
+
+function nuevoMiembro(){
+  selId = 'nueva';
+  imgPend = null;
+  qrPend = null;
+  borrador = {
+    id:'', nombre:'', rol:'', descripcion:'', email:'', telefono:'', activo:false,
+    vcard:'', qr:'', imagen:''
+  };
+  render();
+}
+
+function renderEditor(){
+  var cont = $('editorBody');
+
+  if (!selId || !borrador){
+    $('editorTitulo').textContent = 'Ficha';
+    $('editorHint').textContent = 'Elige una persona de la lista o crea una nueva.';
+    cont.innerHTML = '';
+    return;
+  }
+
+  var esNueva = (selId==='nueva');
+  var b = borrador;
+
+  $('editorTitulo').textContent = esNueva ? 'Nueva persona' : (b.nombre || 'Persona');
+  $('editorHint').textContent = esNueva
+    ? 'Rellena la ficha y créala. La foto se sube al guardar. Entra al final de la lista: después muévela a su sitio.'
+    : 'Edita la ficha. La foto se sube al guardar.';
+
+  var roles = rolesExistentes();
+  var opts = '';
+  for (var i=0;i<roles.length;i++){ opts += '<option value="'+esc(roles[i])+'"></option>'; }
+
+  var h = '';
+
+  h += '<div class="ficha">';
+
+  // Columna foto
+  h += '<div class="fld"><label>Foto</label>' +
+    '<div class="imgbig" id="imgDrop">' +
+      (b.imagen
+        ? '<img id="pvImg" src="'+esc(b.imagen)+'" alt="">'
+        : '<div class="ph" id="pvImg"><span class="ic">👤</span><span>Arrastra una foto o pulsa para subir</span></div>') +
+    '</div>' +
+    '<div class="img-actions">' +
+      '<button class="btn btn-2 btn-sm" id="btnImg">Subir foto…</button>' +
+      '<input type="file" id="fileImg" accept="image/*" style="display:none">' +
+    '</div>' +
+    '<span class="hint" style="display:block;margin-top:6px">JPG o PNG, máx. 3 MB. Vertical (3:4) encaja mejor.</span>' +
+  '</div>';
+
+  // Columna datos
+  h += '<div>';
+
+  h += '<div class="fld fld-nombre"><label>Nombre</label>' +
+    '<input type="text" id="fNombre" value="'+esc(b.nombre)+'" placeholder="Nombre y apellidos"></div>';
+
+  h += '<div class="fld fld-rol"><label>Rol</label>' +
+    '<input type="text" id="fRol" list="rolesList" value="'+esc(b.rol)+'" placeholder="Escribe o elige uno de los existentes" autocomplete="off">' +
+    '<datalist id="rolesList">'+opts+'</datalist></div>';
+
+  var areas = areasExistentes();
+  var optsArea = '';
+  for (var ia=0;ia<areas.length;ia++){ optsArea += '<option value="'+esc(areas[ia])+'"></option>'; }
+
+  h += '<div class="fld"><label>Área</label>' +
+    '<input type="text" id="fDescripcion" list="areasList" value="'+esc(b.descripcion)+'" placeholder="Escribe o elige una de las existentes" autocomplete="off">' +
+    '<datalist id="areasList">'+optsArea+'</datalist></div>';
+
+  h += '<div class="row2">' +
+    '<div class="fld"><label>Email</label>' +
+      '<input type="email" id="fEmail" value="'+esc(b.email)+'" placeholder="nombre@centrimerca.es"></div>' +
+    '<div class="fld"><label>Teléfono</label>' +
+      '<input type="tel" id="fTelefono" value="'+esc(b.telefono)+'" placeholder="Solo cifras, sin +34"></div>' +
+  '</div>';
+
+  h += '<div class="fld">' +
+    '<label class="switch'+(b.activo?' on':'')+'" id="swActivo">' +
+      '<input type="checkbox" id="fActivo"'+(b.activo?' checked':'')+'>' +
+      '<span class="sw-txt"><b>Visible en la web</b><small>'+(esNueva?'Márcalo cuando la ficha esté completa.':'Si lo desmarcas, deja de mostrarse en la web.')+'</small></span>' +
+    '</label>' +
+  '</div>';
+
+  h += '</div>';   // fin columna datos
+  h += '</div>';   // fin .ficha
+
+  // vCard + QR
+  var qrVista;
+  if (b.qr) qrVista = '<img id="pvQr" src="'+esc(b.qr)+'" alt="QR">';
+  else      qrVista = '<div class="ph">Sin QR · pulsa o arrastra para subir</div>';
+
+  var qrEstado = (qrPend || b.qrDesdeVcard) ? 'QR nuevo · pulsa Guardar' : 'QR actual';
+
+  h += '<div class="fld"><label>Tarjeta de contacto (vCard) y QR</label>' +
+    '<div class="qrrow">' +
+      '<div class="qr-main">' +
+        '<input type="url" id="fVcard" value="'+esc(b.vcard)+'" placeholder="https://…">' +
+        '<span class="hint" style="display:block;margin-top:6px">Si cambias el enlace y el QR actual es el generado desde la vCard, se actualiza solo al guardar. Un QR subido no se toca.</span>' +
+        (b.vcard ? '<a class="link" href="'+esc(b.vcard)+'" target="_blank" rel="noopener">Abrir vCard ↗</a>' : '') +
+        '<div class="img-actions">' +
+          '<button class="btn btn-2 btn-sm" id="btnQr">Subir QR…</button>' +
+          '<button class="btn btn-2 btn-sm" id="btnQrVcard">Generar QR desde la vCard</button>' +
+          '<input type="file" id="fileQr" accept="image/*" style="display:none">' +
+        '</div>' +
+      '</div>' +
+      '<div class="qrbox">' +
+        '<div class="qrdrop" id="qrDrop" title="Pulsa o arrastra una imagen para cambiar el QR">' + qrVista + '</div>' +
+        '<small>' + qrEstado + '</small>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+
+  // Acciones
+  h += '<div class="actions">' +
+    '<button class="btn" id="btnGuardar">'+(esNueva?'Crear persona':'Guardar cambios')+'</button>' +
+    '<button class="btn btn-2 btn-sm" id="btnCancelar">Descartar cambios</button>' +
+    '<span class="spacer"></span>' +
+    (esNueva ? '' : '<button class="btn btn-2 btn-sm" id="btnDuplicar" title="Crea una copia no visible justo debajo">Duplicar ficha</button>') +
+    (esNueva ? '' : '<button class="btn btn-danger btn-sm" id="btnBorrar">Eliminar persona</button>') +
+  '</div>';
+
+  cont.innerHTML = h;
+  cablearEditor(esNueva);
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * CABLEADO DE LA FICHA (tras cada render)
+ * ═════════════════════════════════════════════════════════════════════════ */
+function cablearEditor(esNueva){
+  // Foto: click en la caja o en el botón, y drag&drop
+  var drop = $('imgDrop');
+  var file = $('fileImg');
+  var btnImg = $('btnImg');
+  if (btnImg) btnImg.addEventListener('click', function(){ file.click(); });
+  if (drop) drop.addEventListener('click', function(){ file.click(); });
+  if (file) file.addEventListener('change', function(e){
+    manejarArchivo(e.target.files[0], 'imagen');
+    e.target.value = '';
+  });
+  if (drop){
+    drop.addEventListener('dragover', function(e){ e.preventDefault(); drop.classList.add('dragging'); });
+    drop.addEventListener('dragleave', function(){ drop.classList.remove('dragging'); });
+    drop.addEventListener('drop', function(e){
+      e.preventDefault(); drop.classList.remove('dragging');
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) manejarArchivo(e.dataTransfer.files[0], 'imagen');
+    });
+  }
+
+  // QR: click en el recuadro o en el botón, y drag&drop
+  var qrDrop = $('qrDrop');
+  var fileQr = $('fileQr');
+  var btnQr  = $('btnQr');
+  if (btnQr) btnQr.addEventListener('click', function(){ fileQr.click(); });
+  if (qrDrop) qrDrop.addEventListener('click', function(){ fileQr.click(); });
+  if (fileQr) fileQr.addEventListener('change', function(e){
+    manejarArchivo(e.target.files[0], 'qr');
+    e.target.value = '';
+  });
+  if (qrDrop){
+    qrDrop.addEventListener('dragover', function(e){ e.preventDefault(); qrDrop.classList.add('dragging'); });
+    qrDrop.addEventListener('dragleave', function(){ qrDrop.classList.remove('dragging'); });
+    qrDrop.addEventListener('drop', function(e){
+      e.preventDefault(); qrDrop.classList.remove('dragging');
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) manejarArchivo(e.dataTransfer.files[0], 'qr');
+    });
+  }
+
+  // QR: generar desde la vCard (lo hace el backend al guardar)
+  var bqv = $('btnQrVcard');
+  if (bqv) bqv.addEventListener('click', function(){
+    recogerFicha();
+    if (!borrador.vcard){ toast('Escribe primero el enlace de la vCard'); return; }
+    qrPend = null;
+    borrador.qrDesdeVcard = true;
+    borrador.qr = qrDesdeVcard(borrador.vcard);   // vista previa inmediata
+    render();
+    toast('QR generado. Pulsa Guardar para guardarlo.');
+  });
+
+  // Si el QR viene de la vCard y se edita el enlace, la vista previa lo sigue.
+  var fv = $('fVcard');
+  if (fv) fv.addEventListener('input', function(){
+    if (!borrador || !borrador.qrDesdeVcard) return;
+    var u = qrDesdeVcard(this.value);
+    var im = $('pvQr');
+    if (im && u){ im.src = u; borrador.qr = u; }
+  });
+
+  var bg = $('btnGuardar');
+  if (bg) bg.addEventListener('click', guardarMiembro);
+
+  var bc = $('btnCancelar');
+  if (bc) bc.addEventListener('click', function(){
+    if (esNueva){ selId=''; borrador=null; imgPend=null; qrPend=null; }
+    else { abrirMiembro(selId); return; }
+    render();
+  });
+
+  // Interruptor «Visible en la web»: reflejo visual al marcar (se guarda con la ficha)
+  var chk = $('fActivo'), sw = $('swActivo');
+  if (chk && sw) chk.addEventListener('change', function(){ sw.classList.toggle('on', chk.checked); });
+
+  // Duplicar: el backend copia los datos GUARDADOS de esta persona
+  var bd = $('btnDuplicar');
+  if (bd) bd.addEventListener('click', function(){
+    if (duplicando) return;
+    duplicando = true;
+    bd.disabled = true;
+    send('duplicarMiembro', { miembroId: selId });
+    toast('Duplicando ficha…');
+  });
+
+  var bb = $('btnBorrar');
+  if (bb) bb.addEventListener('click', function(){
+    if (!confirm('¿Eliminar a "'+(borrador.nombre||'esta persona')+'" del equipo? No se puede deshacer.')) return;
+    send('deleteMiembro', { miembroId: selId });
+  });
+}
+
+function manejarArchivo(f, destino){
+  leerImagen(f, function(datos, dataUrl){
+    recogerFicha();            // conservar lo escrito antes del repintado
+    if (destino === 'qr'){
+      qrPend = datos;
+      borrador.qr = dataUrl;   // vista previa inmediata; el guardado sube el archivo
+      borrador.qrDesdeVcard = false;
+      render();
+      toast('QR listo. Pulsa Guardar para subirlo.');
+    } else {
+      imgPend = datos;
+      borrador.imagen = dataUrl; // vista previa inmediata; el guardado sube el archivo
+      render();
+      toast('Foto lista. Pulsa Guardar para subirla.');
+    }
+  });
+}
+
+// Una subida cada vez: cada una hace READ-MERGE-UPDATE de la fila entera.
+function siguienteSubida(){
+  var s = colaSubidas.shift();
+  if (s) send('uploadImagen', s);
+}
+
+function leerImagen(file, cb){
+  if (!file) return;
+  if (file.size > MAX_IMG){ toast('Imagen demasiado grande (máx. 3 MB)'); return; }
+  var reader = new FileReader();
+  reader.onload = function(ev){
+    var dataUrl = ev.target.result;
+    cb({
+      base64: String(dataUrl).split(',')[1],
+      fileName: file.name,
+      mimeType: file.type || 'image/jpeg'
+    }, dataUrl);
+  };
+  reader.readAsDataURL(file);
+}
+
+/* ── Recogida del formulario ─────────────────────────────────────────── */
+function recogerFicha(){
+  if (!borrador || !$('fNombre')) return;
+  var g = function(id){ var e=$(id); return e ? e.value : ''; };
+  borrador.nombre      = g('fNombre').trim();
+  borrador.rol         = g('fRol').trim();
+  borrador.descripcion = g('fDescripcion').trim();
+  borrador.email       = g('fEmail').trim();
+  borrador.telefono    = g('fTelefono').trim();
+  borrador.vcard       = g('fVcard').trim();
+  var ca = $('fActivo');
+  if (ca) borrador.activo = ca.checked;
+  // imagen: la data-url de vista previa no se manda en datos; se sube aparte
+}
+
+function guardarMiembro(){
+  recogerFicha();
+  if (!borrador.nombre){ toast('El nombre es obligatorio'); return; }
+  $('btnGuardar').disabled = true;
+  send('saveMiembro', {
+    miembroId: (selId==='nueva') ? '' : selId,
+    datos: {
+      nombre: borrador.nombre,
+      rol: borrador.rol,
+      descripcion: borrador.descripcion,
+      email: borrador.email,
+      telefono: borrador.telefono,
+      vcard: borrador.vcard,
+      qrDesdeVcard: borrador.qrDesdeVcard === true,
+      activo: borrador.activo === true
+    }
+  });
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * RENDER RAÍZ
+ * ═════════════════════════════════════════════════════════════════════════ */
+function render(){
+  renderStatus();
+  renderLista();
+  renderEditor();
+  notifyHeight();
+}
+
+function bloquear(motivo){
+  $('mainBody').style.display = 'none';
+  document.querySelector('.status-bar').style.display = 'none';
+  var g = $('gate');
+  g.style.display = 'block';
+  g.textContent = motivo || 'No tienes acceso al gestor de equipo.';
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * MENSAJES  (Page → Widget)
+ * ═════════════════════════════════════════════════════════════════════════ */
+window.addEventListener('message', function(event){
+  var msg = event.data;
+  if (!msg || typeof msg!=='object') return;
+  var p = msg.payload;
+
+  if (msg.type==='equipoCargado'){
+    if (!p || !p.ok){
+      if (p && p.error && /acceso|sesión/i.test(p.error)) return bloquear(p.error);
+      $('sbEstado').textContent = 'Error de carga';
+      toast('Error: ' + (p ? p.error : 'desconocido'), 5000);
+      return;
+    }
+    EQ.miembros = p.equipo || [];
+    $('sbEstado').textContent = 'Equipo cargado';
+    render();
+    return;
+  }
+
+  if (msg.type==='miembroGuardado'){
+    var bg = $('btnGuardar'); if (bg) bg.disabled = false;
+    if (!p || !p.ok){ toast('Error: ' + (p ? p.error : '?'), 5000); return; }
+
+    var nuevo = p.miembro;
+    var i = -1;
+    for (var k=0;k<EQ.miembros.length;k++){ if (EQ.miembros[k].id===nuevo.id){ i=k; break; } }
+    if (i>=0) EQ.miembros[i] = nuevo; else EQ.miembros.push(nuevo);
+
+    selId = nuevo.id;
+    borrador = JSON.parse(JSON.stringify(nuevo));
+
+    colaSubidas = [];
+    if (imgPend) colaSubidas.push({ destino:'imagen', id:nuevo.id, base64Data:imgPend.base64, fileName:imgPend.fileName, mimeType:imgPend.mimeType });
+    if (qrPend)  colaSubidas.push({ destino:'qr',     id:nuevo.id, base64Data:qrPend.base64,  fileName:qrPend.fileName,  mimeType:qrPend.mimeType });
+    imgPend = null; qrPend = null;
+
+    if (colaSubidas.length){
+      var que = colaSubidas.length===2 ? 'foto y QR' : (colaSubidas[0].destino==='qr' ? 'QR' : 'foto');
+      toast('Ficha guardada. Subiendo ' + que + '…');
+      siguienteSubida();
+    } else {
+      toast('Ficha guardada');
+    }
+    render();
+    return;
+  }
+
+  if (msg.type==='imagenSubida'){
+    var campo = (p && p.destino==='qr') ? 'qr' : 'imagen';
+    if (!p || !p.ok){
+      toast('Error subiendo ' + (campo==='qr' ? 'el QR' : 'la foto') + ': ' + (p ? p.error : '?'), 5000);
+      siguienteSubida();
+      return;
+    }
+    var nr = miembroPorId(p.id);
+    if (nr) nr[campo] = p.publicUrl;
+    if (borrador && borrador.id===p.id){
+      recogerFicha();            // no perder lo escrito mientras subía
+      borrador[campo] = p.publicUrl;
+    }
+    toast(campo==='qr' ? 'QR subido' : 'Foto subida');
+    render();
+    siguienteSubida();
+    return;
+  }
+
+  if (msg.type==='miembroMovido'){
+    moviendo = false;
+    if (!p || !p.ok){
+      if (antesDeMover) EQ.miembros = antesDeMover;   // deshacer en pantalla
+      antesDeMover = null;
+      toast('Error: ' + (p ? p.error : '?'), 5000);
+      renderLista();
+      return;
+    }
+    antesDeMover = null;
+    // Se toma el ORDEN real de la respuesta; los datos de cada persona, los
+    // locales (pueden ser más recientes si se guardó una ficha a la vez).
+    var local = {};
+    for (var q=0;q<EQ.miembros.length;q++){ local[EQ.miembros[q].id] = EQ.miembros[q]; }
+    EQ.miembros = (p.equipo || []).map(function(f){ return local[f.id] || f; });
+    toast('Orden guardado');
+    renderLista();
+    return;
+  }
+
+  if (msg.type==='miembroToggled'){
+    if (!p || !p.ok){ toast('Error: ' + (p ? p.error : '?'), 4000); return; }
+    var mt = miembroPorId(p.id);
+    if (mt) mt.activo = p.valor;
+    if (borrador && borrador.id===p.id){
+      recogerFicha();                                 // no perder lo escrito
+      borrador.activo = p.valor;
+    }
+    toast(p.valor ? 'Visible en la web' : 'Oculta en la web');
+    render();
+    return;
+  }
+
+  if (msg.type==='miembroDuplicado'){
+    duplicando = false;
+    var bdup = $('btnDuplicar'); if (bdup) bdup.disabled = false;
+    if (!p || !p.ok){ toast('Error: ' + (p ? p.error : '?'), 5000); return; }
+    // Orden real de la respuesta; datos locales donde ya los hay (pueden ser más recientes).
+    var loc = {};
+    for (var z=0;z<EQ.miembros.length;z++){ loc[EQ.miembros[z].id] = EQ.miembros[z]; }
+    EQ.miembros = (p.equipo || []).map(function(f){ return loc[f.id] || f; });
+    toast('Copia creada (no visible). Edítala y márcala como visible.');
+    abrirMiembro(p.miembro.id);
+    return;
+  }
+
+  if (msg.type==='miembroEliminado'){
+    if (!p || !p.ok){ toast('Error: ' + (p ? p.error : '?'), 4000); return; }
+    EQ.miembros = EQ.miembros.filter(function(x){ return x.id!==msg.miembroId; });
+    selId=''; borrador=null; imgPend=null; qrPend=null;
+    toast('Persona eliminada');
+    render();
+    return;
+  }
+
+  if (msg.type==='error'){
+    var be = $('btnGuardar'); if (be) be.disabled = false;
+    if (duplicando){ duplicando = false; var bde = $('btnDuplicar'); if (bde) bde.disabled = false; }
+    if (moviendo){                                    // falló un cambio de orden
+      moviendo = false;
+      if (antesDeMover) EQ.miembros = antesDeMover;
+      antesDeMover = null;
+      renderLista();
+    }
+    toast('Error: ' + (p ? p.error : 'desconocido'), 5000);
+    return;
+  }
+});
+
+/* ── Cableado fijo ───────────────────────────────────────────────────── */
+$('filtroArea').addEventListener('change', function(){
+  filtroArea = this.value;
+  renderLista();
+});
+$('busca').addEventListener('input', function(){
+  busca = this.value.trim().toLowerCase();
+  renderLista();
+});
+$('btnNueva').addEventListener('click', nuevoMiembro);
+
+/* ── Alto del iframe ─────────────────────────────────────────────────── */
+var lastH = 0;
+function notifyHeight(){
+  var h = document.documentElement.scrollHeight;
+  if (h!==lastH){ lastH = h; send('resize', {height:h}); }
+}
+try {
+  var ro = new ResizeObserver(notifyHeight); ro.observe(document.body);
+} catch (e) {
+  window.addEventListener('resize', notifyHeight);
+  setInterval(notifyHeight, 1200);
+}
+
+send('ready', {});
+</script>
+</body>
+</html>
