@@ -1,7 +1,12 @@
 /*
  * CENTRIMERCA — Ficha de Contacto · Custom Element
- * Archivo:  fichaContacto.js   ·   v1.0.2
+ * Archivo:  fichaContacto.js   ·   v1.0.3
  * Tag name: ficha-contacto      ·   Element ID esperado: #fichaContacto
+ *
+ * v1.0.3 — Radio de esquina = 10 % del ALTO de cada bloque (v1.0.2 lo
+ *   calculaba sobre el ancho y en la banda equivalía a un 32 %):
+ *   portada 288 px → 29 px · banda de acciones 121 px → 12 px.
+ *   Solo cambian esas dos líneas de CSS.
  *
  * v1.0.2 — MÓVIL (incluye todo lo de v1.0.1):
  *   - Esquinas redondeadas en la portada y en la banda de acciones:
@@ -152,7 +157,7 @@
     .m{ display:block; position:relative; background:#F6FAF9; color:#00393C; }
     .d{ display:none; }
 
-    .m-cover{ position:relative; height:288px; overflow:hidden; background:#006166; border-radius:min(10vw, 40px); }
+    .m-cover{ position:relative; height:288px; overflow:hidden; background:#006166; border-radius:29px; }
     .m-cover-img{
       position:absolute; inset:0; width:100%; height:100%; display:block;
       object-fit:cover; object-position:center 62%;
@@ -207,7 +212,7 @@
     }
     .m-role{ margin:10px 0 0; font-size:17px; line-height:1.35; font-weight:500; color:#24494B; }
 
-    .m-actions{ margin-top:28px; background:#006166; padding:22px 14px; border-radius:min(10vw, 40px); }
+    .m-actions{ margin-top:28px; background:#006166; padding:22px 14px; border-radius:12px; }
     .m-actions-grid{
       max-width:640px; margin:0 auto;
       display:grid; grid-template-columns:repeat(var(--n,5),minmax(0,1fr)); gap:6px;
