@@ -6,10 +6,23 @@
 <title>CENTRIMERCA · Gestor de equipo</title>
 
 <!-- ═══════════════════════════════════════════════════════════════════════
-     CENTRIMERCA — Gestor de equipo · v1.0.3 · 13 Oct 2026
+     CENTRIMERCA — Gestor de equipo · v1.0.5 · 14 Oct 2026
 
-     REQUIERE: centriEquipo.web.js v1.0.3 + GestorEquipo.page.js v1.0.3
+     REQUIERE: centriEquipo.web.js v1.0.4 + GestorEquipo.page.js v1.0.3 (sin cambios)
      ELEMENTO:  #htmlEquipoCentri (HtmlComponent)   ← confirma el Element ID
+
+     v1.0.5: ficha de contacto (versión 14 Oct 2026)
+       - «Área» pasa al campo `area` (filtro y sugerencias incluidos).
+         `descripcion` pasa a ser «Presentación»: el texto breve de la ficha.
+       - Campos nuevos: Web, Dirección, Foto general (portada de la ficha) y
+         «Foto del contacto en la agenda» (Foto del empleado | Foto general).
+       - «Ficha de contacto»: enlace de la ficha (solo lectura). El slug lo
+         asigna el backend al publicar la persona y no cambia nunca.
+       - QR: lleva a la ficha y lo genera el backend. «Subir QR…» se mantiene
+         (un QR subido se respeta); «Usar QR de la ficha» vuelve al generado.
+       - Fuera el enlace vCard (QR TIGER) y «Generar QR desde la vCard». El
+         campo `vcard` sigue en la colección, sin tocar.
+       - Subidas en serie: foto, foto general y QR.
 
      v1.0.4: (versión 14 Oct 2026)
        - Visible / no visible (campo `activo`): círculo en cada fila (se guarda
@@ -48,9 +61,12 @@
      sin texto enriquecido ni etiquetas: `descripcion` de equipo es texto plano.
 
      COLECCIÓN: equipo  (field keys leídos del esquema real)
-     CAMPOS:  nombre · rol · descripcion (texto) · imagen (imagen)
-              email (email) · numeroTelefono (NÚMERO) · vcard (url)
-              qr (imagen; se sube o se genera desde la vCard)
+     CAMPOS:  nombre · rol · area (texto) · descripcion (texto: presentación)
+              imagen (imagen) · fotoGeneral (imagen) · fotoAgenda (texto)
+              email (email) · numeroTelefono (NÚMERO) · web (url)
+              direccion (texto) · slug (texto; lo asigna el backend)
+              qr (imagen; se sube o lo genera el backend desde la ficha)
+              vcard (url; heredado, ya no se edita aquí)
 
      ORDEN: el de la lista es el de la web; se cambia en este gestor.
      ═══════════════════════════════════════════════════════════════════════ -->
@@ -187,6 +203,27 @@ textarea::placeholder,input::placeholder{color:var(--muted2)}
 .switch .sw-txt b{display:block;color:var(--fg);font-weight:600;font-size:13.5px}
 .switch .sw-txt small{display:block;color:var(--muted);font-size:11px;margin-top:2px;line-height:1.35}
 
+/* ── Ficha de contacto (v1.0.5) ───────────────────────────────────────── */
+.fichalink{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel2)}
+.fichalink code{font-family:var(--font);font-size:12.5px;color:var(--fg2);overflow-wrap:anywhere;min-width:0}
+.portada{width:100%;max-width:420px;border:1.5px dashed var(--line3);border-radius:var(--r);background:var(--panel3);overflow:hidden;cursor:pointer;transition:border-color .2s,background .2s}
+.portada:hover{border-color:var(--accent)}
+.portada.dragging{border-color:var(--accent);background:var(--accent-dim)}
+.portada img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block}
+.portada .ph{width:100%;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;color:var(--muted2);font-size:12.5px;text-align:center;padding:16px}
+/* Selector «Foto del contacto en la agenda» (diseño del lienzo) */
+.fld-seg{margin-bottom:14px}
+.seg-fs{border:0;margin:0;padding:0;min-width:0}
+.seg-fs legend{display:block;padding:0;font-size:11px;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.4px}
+.seg{display:flex;flex-wrap:wrap;width:fit-content;max-width:100%;gap:4px;padding:5px;border-radius:31px;background:#E4F0EF}
+.seg label{position:relative;display:flex;align-items:center;gap:10px;min-height:52px;padding:5px 20px 5px 5px;border-radius:999px;color:#00393C;cursor:pointer;font-size:14px;font-weight:600;white-space:nowrap;transition:background .18s,color .18s}
+.seg label.on{background:var(--accent);color:#fff}
+.seg input{position:absolute;width:1px;height:1px;margin:0;opacity:0;pointer-events:none}
+.seg label:has(input:focus-visible){outline:2px solid #E80A4D;outline-offset:2px}
+.seg img,.seg .av{width:42px;height:42px;border-radius:50%;object-fit:cover;object-position:50% 25%;border:2px solid #CFE5E3;display:block;flex:none;background:var(--panel3)}
+.seg label.on img,.seg label.on .av{border-color:#fff}
+.seg .av{display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--muted2)}
+
 .ft{padding:10px 16px;border-top:1px solid var(--line);background:var(--panel);font-size:11px;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap}
 #toast{display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--fg);color:#fff;padding:9px 16px;border-radius:var(--r);font-size:12.5px;z-index:99;box-shadow:0 4px 14px rgba(0,0,0,.2)}
 .gate{display:none;margin:16px;padding:14px;border:1px solid var(--red);border-radius:var(--r);background:rgba(192,80,77,.06);color:var(--red);font-size:13px;line-height:1.55}
@@ -243,7 +280,7 @@ textarea::placeholder,input::placeholder{color:var(--muted2)}
   </div>
 
   <div class="ft">
-    <span>Gestor de equipo v1.0.4</span>
+    <span>Gestor de equipo v1.0.5</span>
     <span>Colección: equipo</span>
   </div>
 
@@ -268,17 +305,18 @@ var selId    = '';               // id de la persona seleccionada ('nueva' = alt
 var borrador = null;             // copia editable de la persona seleccionada
 var imgPend  = null;             // { base64, fileName, mimeType } a subir tras guardar
 var qrPend   = null;             // ídem para el QR
+var fgPend   = null;             // ídem para la foto general (v1.0.5)
 var colaSubidas = [];            // subidas pendientes tras guardar, de una en una
 
 var $ = function(id){ return document.getElementById(id); };
 
-// Mismo patrón que el backend (centriEquipo.web.js · _qrDesdeVcard), solo
-// para la vista previa. Lo que se guarda lo calcula el backend.
+// Mismo patrón que el backend (centriEquipo.web.js · _qrFicha), solo para la
+// vista previa. Lo que se guarda lo calcula el backend.
 var QR_BASE   = 'https://quickchart.io/qr?text=';
 var QR_PARAMS = '&size=300&margin=1&ecLevel=M&format=png';
-function qrDesdeVcard(v){
-  v = String(v==null?'':v).trim();
-  return v ? (QR_BASE + encodeURIComponent(v) + QR_PARAMS) : '';
+function qrDeFicha(url){
+  url = String(url==null?'':url).trim();
+  return url ? (QR_BASE + encodeURIComponent(url) + QR_PARAMS) : '';
 }
 
 function toast(msg, ms){
@@ -314,9 +352,9 @@ function rolesExistentes(){
   return out;
 }
 
-// Áreas (campo `descripcion`) distintas SACADAS DE LOS DATOS, tal cual están
+// Áreas (campo `area`, v1.0.5) distintas SACADAS DE LOS DATOS, tal cual están
 // escritas (sin espacios a los lados). Alimentan el filtro y las sugerencias.
-function areaDe(m){ return String(m && m.descripcion != null ? m.descripcion : '').trim(); }
+function areaDe(m){ return String(m && m.area != null ? m.area : '').trim(); }
 
 function areasExistentes(){
   var set = {}; var out = [];
@@ -537,6 +575,7 @@ function abrirMiembro(id){
   selId = id;
   imgPend = null;
   qrPend = null;
+  fgPend = null;
   var m = miembroPorId(id);
   borrador = m ? JSON.parse(JSON.stringify(m)) : null;
   render();
@@ -546,9 +585,11 @@ function nuevoMiembro(){
   selId = 'nueva';
   imgPend = null;
   qrPend = null;
+  fgPend = null;
   borrador = {
-    id:'', nombre:'', rol:'', descripcion:'', email:'', telefono:'', activo:false,
-    vcard:'', qr:'', imagen:''
+    id:'', nombre:'', rol:'', area:'', descripcion:'', email:'', telefono:'',
+    web:'', direccion:'', activo:false, qr:'', imagen:'', fotoGeneral:'',
+    fotoAgenda:'empleado', slug:'', fichaUrl:''
   };
   render();
 }
@@ -568,8 +609,8 @@ function renderEditor(){
 
   $('editorTitulo').textContent = esNueva ? 'Nueva persona' : (b.nombre || 'Persona');
   $('editorHint').textContent = esNueva
-    ? 'Rellena la ficha y créala. La foto se sube al guardar. Entra al final de la lista: después muévela a su sitio.'
-    : 'Edita la ficha. La foto se sube al guardar.';
+    ? 'Rellena la ficha y créala. Las fotos se suben al guardar. Entra al final de la lista: después muévela a su sitio.'
+    : 'Edita la ficha. Las fotos y el QR se suben al guardar.';
 
   var roles = rolesExistentes();
   var opts = '';
@@ -608,8 +649,11 @@ function renderEditor(){
   for (var ia=0;ia<areas.length;ia++){ optsArea += '<option value="'+esc(areas[ia])+'"></option>'; }
 
   h += '<div class="fld"><label>Área</label>' +
-    '<input type="text" id="fDescripcion" list="areasList" value="'+esc(b.descripcion)+'" placeholder="Escribe o elige una de las existentes" autocomplete="off">' +
+    '<input type="text" id="fArea" list="areasList" value="'+esc(b.area)+'" placeholder="Escribe o elige una de las existentes" autocomplete="off">' +
     '<datalist id="areasList">'+optsArea+'</datalist></div>';
+
+  h += '<div class="fld"><label>Presentación</label>' +
+    '<textarea id="fDescripcion" rows="3" placeholder="Texto breve que aparece en la ficha de contacto">'+esc(b.descripcion)+'</textarea></div>';
 
   h += '<div class="row2">' +
     '<div class="fld"><label>Email</label>' +
@@ -617,6 +661,12 @@ function renderEditor(){
     '<div class="fld"><label>Teléfono</label>' +
       '<input type="tel" id="fTelefono" value="'+esc(b.telefono)+'" placeholder="Solo cifras, sin +34"></div>' +
   '</div>';
+
+  h += '<div class="fld"><label>Web</label>' +
+    '<input type="url" id="fWeb" value="'+esc(b.web)+'" placeholder="www.centrimerca.com"></div>';
+
+  h += '<div class="fld"><label>Dirección</label>' +
+    '<textarea id="fDireccion" rows="2" placeholder="Dirección que abre el mapa de la ficha">'+esc(b.direccion)+'</textarea></div>';
 
   h += '<div class="fld">' +
     '<label class="switch'+(b.activo?' on':'')+'" id="swActivo">' +
@@ -628,22 +678,63 @@ function renderEditor(){
   h += '</div>';   // fin columna datos
   h += '</div>';   // fin .ficha
 
-  // vCard + QR
+  // ── Ficha de contacto (v1.0.5) ──────────────────────────────────────────
+  // Enlace (solo lectura: el slug lo asigna el backend al publicar)
+  h += '<div class="fld"><label>Ficha de contacto</label>' +
+    '<div class="fichalink">' +
+      (b.fichaUrl
+        ? '<code>'+esc(b.fichaUrl)+'</code><span class="spacer"></span>' +
+          '<a class="link" href="'+esc(b.fichaUrl)+'" target="_blank" rel="noopener">Abrir ficha ↗</a>'
+        : '<span class="hint" style="margin:0">El enlace de la ficha se crea al guardar la persona como visible en la web.</span>') +
+    '</div>' +
+  '</div>';
+
+  // Foto general (portada de la ficha)
+  h += '<div class="fld"><label>Foto general · portada de la ficha</label>' +
+    '<div class="portada" id="fgDrop">' +
+      (b.fotoGeneral
+        ? '<img src="'+esc(b.fotoGeneral)+'" alt="">'
+        : '<div class="ph">Arrastra una foto o pulsa para subir</div>') +
+    '</div>' +
+    '<div class="img-actions">' +
+      '<button class="btn btn-2 btn-sm" id="btnFg">Subir foto general…</button>' +
+      '<input type="file" id="fileFg" accept="image/*" style="display:none">' +
+    '</div>' +
+    '<span class="hint" style="display:block;margin-top:6px">JPG o PNG, máx. 3 MB. Horizontal encaja mejor.</span>' +
+  '</div>';
+
+  // Foto del contacto en la agenda: [Foto del empleado | Foto general]
+  var fa = (b.fotoAgenda === 'general') ? 'general' : 'empleado';
+  var av = function(src){ return src ? '<img src="'+esc(src)+'" alt="">' : '<span class="av">👤</span>'; };
+  h += '<div class="fld-seg"><fieldset class="seg-fs">' +
+    '<legend>Foto del contacto en la agenda</legend>' +
+    '<p class="hint" style="margin:0 0 8px">Imagen que acompaña al contacto cuando alguien lo guarda desde la ficha.</p>' +
+    '<div class="seg" id="segAgenda">' +
+      '<label class="'+(fa==='empleado'?'on':'')+'">' +
+        '<input type="radio" name="fotoAgenda" value="empleado"'+(fa==='empleado'?' checked':'')+'>' +
+        av(b.imagen) + '<span>Foto del empleado</span>' +
+      '</label>' +
+      '<label class="'+(fa==='general'?'on':'')+'">' +
+        '<input type="radio" name="fotoAgenda" value="general"'+(fa==='general'?' checked':'')+'>' +
+        av(b.fotoGeneral) + '<span>Foto general</span>' +
+      '</label>' +
+    '</div>' +
+  '</fieldset></div>';
+
+  // QR (lleva a la ficha)
   var qrVista;
   if (b.qr) qrVista = '<img id="pvQr" src="'+esc(b.qr)+'" alt="QR">';
   else      qrVista = '<div class="ph">Sin QR · pulsa o arrastra para subir</div>';
 
-  var qrEstado = (qrPend || b.qrDesdeVcard) ? 'QR nuevo · pulsa Guardar' : 'QR actual';
+  var qrEstado = (qrPend || b.qrFicha) ? 'QR nuevo · pulsa Guardar' : 'QR actual';
 
-  h += '<div class="fld"><label>Tarjeta de contacto (vCard) y QR</label>' +
+  h += '<div class="fld"><label>QR</label>' +
     '<div class="qrrow">' +
       '<div class="qr-main">' +
-        '<input type="url" id="fVcard" value="'+esc(b.vcard)+'" placeholder="https://…">' +
-        '<span class="hint" style="display:block;margin-top:6px">Si cambias el enlace y el QR actual es el generado desde la vCard, se actualiza solo al guardar. Un QR subido no se toca.</span>' +
-        (b.vcard ? '<a class="link" href="'+esc(b.vcard)+'" target="_blank" rel="noopener">Abrir vCard ↗</a>' : '') +
+        '<span class="hint" style="display:block;margin:0 0 6px">El QR lleva a la ficha de contacto y se crea solo al publicarla. Si subes uno propio, se respeta; «Usar QR de la ficha» vuelve al de la ficha.</span>' +
         '<div class="img-actions">' +
           '<button class="btn btn-2 btn-sm" id="btnQr">Subir QR…</button>' +
-          '<button class="btn btn-2 btn-sm" id="btnQrVcard">Generar QR desde la vCard</button>' +
+          (b.fichaUrl ? '<button class="btn btn-2 btn-sm" id="btnQrFicha">Usar QR de la ficha</button>' : '') +
           '<input type="file" id="fileQr" accept="image/*" style="display:none">' +
         '</div>' +
       '</div>' +
@@ -709,25 +800,46 @@ function cablearEditor(esNueva){
     });
   }
 
-  // QR: generar desde la vCard (lo hace el backend al guardar)
-  var bqv = $('btnQrVcard');
-  if (bqv) bqv.addEventListener('click', function(){
+  // QR: volver al de la ficha (lo hace el backend al guardar) · v1.0.5
+  var bqf = $('btnQrFicha');
+  if (bqf) bqf.addEventListener('click', function(){
     recogerFicha();
-    if (!borrador.vcard){ toast('Escribe primero el enlace de la vCard'); return; }
+    if (!borrador.fichaUrl){ toast('La ficha aún no tiene enlace: guarda la persona como visible.'); return; }
     qrPend = null;
-    borrador.qrDesdeVcard = true;
-    borrador.qr = qrDesdeVcard(borrador.vcard);   // vista previa inmediata
+    borrador.qrFicha = true;
+    borrador.qr = qrDeFicha(borrador.fichaUrl);    // vista previa inmediata
     render();
-    toast('QR generado. Pulsa Guardar para guardarlo.');
+    toast('QR de la ficha listo. Pulsa Guardar para guardarlo.');
   });
 
-  // Si el QR viene de la vCard y se edita el enlace, la vista previa lo sigue.
-  var fv = $('fVcard');
-  if (fv) fv.addEventListener('input', function(){
-    if (!borrador || !borrador.qrDesdeVcard) return;
-    var u = qrDesdeVcard(this.value);
-    var im = $('pvQr');
-    if (im && u){ im.src = u; borrador.qr = u; }
+  // Foto general: click en la caja o en el botón, y drag&drop · v1.0.5
+  var fgDrop = $('fgDrop');
+  var fileFg = $('fileFg');
+  var btnFg  = $('btnFg');
+  if (btnFg) btnFg.addEventListener('click', function(){ fileFg.click(); });
+  if (fgDrop) fgDrop.addEventListener('click', function(){ fileFg.click(); });
+  if (fileFg) fileFg.addEventListener('change', function(e){
+    manejarArchivo(e.target.files[0], 'fotoGeneral');
+    e.target.value = '';
+  });
+  if (fgDrop){
+    fgDrop.addEventListener('dragover', function(e){ e.preventDefault(); fgDrop.classList.add('dragging'); });
+    fgDrop.addEventListener('dragleave', function(){ fgDrop.classList.remove('dragging'); });
+    fgDrop.addEventListener('drop', function(e){
+      e.preventDefault(); fgDrop.classList.remove('dragging');
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) manejarArchivo(e.dataTransfer.files[0], 'fotoGeneral');
+    });
+  }
+
+  // Foto del contacto en la agenda: reflejo visual al elegir (se guarda con la ficha)
+  var seg = $('segAgenda');
+  if (seg) seg.querySelectorAll('input[name="fotoAgenda"]').forEach(function(r){
+    r.addEventListener('change', function(){
+      seg.querySelectorAll('label').forEach(function(l){
+        var inp = l.querySelector('input');
+        l.classList.toggle('on', !!(inp && inp.checked));
+      });
+    });
   });
 
   var bg = $('btnGuardar');
@@ -735,7 +847,7 @@ function cablearEditor(esNueva){
 
   var bc = $('btnCancelar');
   if (bc) bc.addEventListener('click', function(){
-    if (esNueva){ selId=''; borrador=null; imgPend=null; qrPend=null; }
+    if (esNueva){ selId=''; borrador=null; imgPend=null; qrPend=null; fgPend=null; }
     else { abrirMiembro(selId); return; }
     render();
   });
@@ -767,9 +879,14 @@ function manejarArchivo(f, destino){
     if (destino === 'qr'){
       qrPend = datos;
       borrador.qr = dataUrl;   // vista previa inmediata; el guardado sube el archivo
-      borrador.qrDesdeVcard = false;
+      borrador.qrFicha = false;
       render();
       toast('QR listo. Pulsa Guardar para subirlo.');
+    } else if (destino === 'fotoGeneral'){
+      fgPend = datos;
+      borrador.fotoGeneral = dataUrl; // vista previa inmediata; el guardado sube el archivo
+      render();
+      toast('Foto general lista. Pulsa Guardar para subirla.');
     } else {
       imgPend = datos;
       borrador.imagen = dataUrl; // vista previa inmediata; el guardado sube el archivo
@@ -806,13 +923,17 @@ function recogerFicha(){
   var g = function(id){ var e=$(id); return e ? e.value : ''; };
   borrador.nombre      = g('fNombre').trim();
   borrador.rol         = g('fRol').trim();
+  borrador.area        = g('fArea').trim();
   borrador.descripcion = g('fDescripcion').trim();
   borrador.email       = g('fEmail').trim();
   borrador.telefono    = g('fTelefono').trim();
-  borrador.vcard       = g('fVcard').trim();
+  borrador.web         = g('fWeb').trim();
+  borrador.direccion   = g('fDireccion').trim();
+  var fa = document.querySelector('input[name="fotoAgenda"]:checked');
+  if (fa) borrador.fotoAgenda = fa.value;
   var ca = $('fActivo');
   if (ca) borrador.activo = ca.checked;
-  // imagen: la data-url de vista previa no se manda en datos; se sube aparte
+  // imágenes: las data-url de vista previa no se mandan en datos; se suben aparte
 }
 
 function guardarMiembro(){
@@ -824,11 +945,14 @@ function guardarMiembro(){
     datos: {
       nombre: borrador.nombre,
       rol: borrador.rol,
+      area: borrador.area,
       descripcion: borrador.descripcion,
       email: borrador.email,
       telefono: borrador.telefono,
-      vcard: borrador.vcard,
-      qrDesdeVcard: borrador.qrDesdeVcard === true,
+      web: borrador.web,
+      direccion: borrador.direccion,
+      fotoAgenda: borrador.fotoAgenda === 'general' ? 'general' : 'empleado',
+      qrFicha: borrador.qrFicha === true,
       activo: borrador.activo === true
     }
   });
@@ -886,12 +1010,14 @@ window.addEventListener('message', function(event){
     borrador = JSON.parse(JSON.stringify(nuevo));
 
     colaSubidas = [];
-    if (imgPend) colaSubidas.push({ destino:'imagen', id:nuevo.id, base64Data:imgPend.base64, fileName:imgPend.fileName, mimeType:imgPend.mimeType });
-    if (qrPend)  colaSubidas.push({ destino:'qr',     id:nuevo.id, base64Data:qrPend.base64,  fileName:qrPend.fileName,  mimeType:qrPend.mimeType });
-    imgPend = null; qrPend = null;
+    if (imgPend) colaSubidas.push({ destino:'imagen',      id:nuevo.id, base64Data:imgPend.base64, fileName:imgPend.fileName, mimeType:imgPend.mimeType });
+    if (fgPend)  colaSubidas.push({ destino:'fotoGeneral', id:nuevo.id, base64Data:fgPend.base64,  fileName:fgPend.fileName,  mimeType:fgPend.mimeType });
+    if (qrPend)  colaSubidas.push({ destino:'qr',          id:nuevo.id, base64Data:qrPend.base64,  fileName:qrPend.fileName,  mimeType:qrPend.mimeType });
+    imgPend = null; qrPend = null; fgPend = null;
 
     if (colaSubidas.length){
-      var que = colaSubidas.length===2 ? 'foto y QR' : (colaSubidas[0].destino==='qr' ? 'QR' : 'foto');
+      var nombresSubida = { imagen:'foto', fotoGeneral:'foto general', qr:'QR' };
+      var que = colaSubidas.map(function(s){ return nombresSubida[s.destino]; }).join(', ');
       toast('Ficha guardada. Subiendo ' + que + '…');
       siguienteSubida();
     } else {
@@ -902,9 +1028,10 @@ window.addEventListener('message', function(event){
   }
 
   if (msg.type==='imagenSubida'){
-    var campo = (p && p.destino==='qr') ? 'qr' : 'imagen';
+    var campo = (p && (p.destino==='qr' || p.destino==='fotoGeneral')) ? p.destino : 'imagen';
+    var etiqueta = { imagen:'la foto', fotoGeneral:'la foto general', qr:'el QR' }[campo];
     if (!p || !p.ok){
-      toast('Error subiendo ' + (campo==='qr' ? 'el QR' : 'la foto') + ': ' + (p ? p.error : '?'), 5000);
+      toast('Error subiendo ' + etiqueta + ': ' + (p ? p.error : '?'), 5000);
       siguienteSubida();
       return;
     }
@@ -914,7 +1041,7 @@ window.addEventListener('message', function(event){
       recogerFicha();            // no perder lo escrito mientras subía
       borrador[campo] = p.publicUrl;
     }
-    toast(campo==='qr' ? 'QR subido' : 'Foto subida');
+    toast({ imagen:'Foto subida', fotoGeneral:'Foto general subida', qr:'QR subido' }[campo]);
     render();
     siguienteSubida();
     return;
@@ -944,9 +1071,16 @@ window.addEventListener('message', function(event){
     if (!p || !p.ok){ toast('Error: ' + (p ? p.error : '?'), 4000); return; }
     var mt = miembroPorId(p.id);
     if (mt) mt.activo = p.valor;
+    // v1.0.5: al hacerse visible el backend asigna slug y QR de la ficha.
+    if (mt && p.miembro){ mt.slug = p.miembro.slug; mt.fichaUrl = p.miembro.fichaUrl; mt.qr = p.miembro.qr; }
     if (borrador && borrador.id===p.id){
       recogerFicha();                                 // no perder lo escrito
       borrador.activo = p.valor;
+      if (p.miembro){
+        borrador.slug = p.miembro.slug;
+        borrador.fichaUrl = p.miembro.fichaUrl;
+        if (!qrPend && !borrador.qrFicha) borrador.qr = p.miembro.qr;
+      }
     }
     toast(p.valor ? 'Visible en la web' : 'Oculta en la web');
     render();
@@ -969,7 +1103,7 @@ window.addEventListener('message', function(event){
   if (msg.type==='miembroEliminado'){
     if (!p || !p.ok){ toast('Error: ' + (p ? p.error : '?'), 4000); return; }
     EQ.miembros = EQ.miembros.filter(function(x){ return x.id!==msg.miembroId; });
-    selId=''; borrador=null; imgPend=null; qrPend=null;
+    selId=''; borrador=null; imgPend=null; qrPend=null; fgPend=null;
     toast('Persona eliminada');
     render();
     return;
