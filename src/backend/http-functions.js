@@ -1,8 +1,15 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI · Endpoints HTTP
  * Archivo:  backend/http-functions.js
- * VERSION:  1.0.1
- * FECHA:    25 Agosto 2026
+ * VERSION:  1.0.2
+ * FECHA:    14 Octubre 2026
+ *
+ * v1.0.2 — ADITIVO: nuevo GET /_functions/fichaVcard?id=<_id> (vCard de la
+ *   ficha de contacto del equipo). Añade `notFound` al import de
+ *   wix-http-functions y el import de vcardFichaCore. Nada más cambia.
+ *   ⛔ ORDEN: backend/centriFichaContacto.web.js PRIMERO, este archivo
+ *   DESPUÉS. Mismo riesgo que con centriLogic (ver abajo): si el import no
+ *   resuelve, caen TODOS los endpoints de este archivo.
  *
  * ⚠️ ESTE ARCHIVO ES COMPARTIDO POR TODO EL SITIO. Si ya existe uno en el
  *    proyecto, NO lo sustituyas: añade a él los tres bloques de CENTRI y el
@@ -49,11 +56,13 @@
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
-import { ok, badRequest, serverError } from 'wix-http-functions';
+import { ok, badRequest, serverError, notFound } from 'wix-http-functions';
 
 // Funciones PURAS, no los webMethods. Ver aviso de la cabecera.
 import { askCentriCore, crearSesionCore } from 'backend/centriLogic.web';
 import { centriSynthesizeCore } from 'backend/centriTTS.web';
+// v1.0.2 — Ficha de contacto. ⛔ centriFichaContacto.web.js debe estar desplegado ANTES.
+import { vcardFichaCore } from 'backend/centriFichaContacto.web';
 
 // ⛔ NO DESCOMENTAR HASTA QUE backend/centriTTS.web.js ESTÉ DESPLEGADO.
 //
@@ -168,5 +177,44 @@ export async function post_centriTts(request) {
       headers: JSON_HEADERS,
       body: JSON.stringify({ ok: false, error: 'Error sintetizando la voz.' })
     });
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * GET /_functions/fichaVcard?id=<_id de equipo>          · v1.0.2 (NUEVO)
+ *
+ * vCard 3.0 de la ficha de contacto, con foto. La enlaza el botón «Guardar en
+ * contactos» del custom element ficha-contacto.
+ *
+ * vcardFichaCore aplica la regla de `activo`: persona inactiva o inexistente
+ * → 404 con texto plano, nunca datos.
+ * ─────────────────────────────────────────────────────────────────────────── */
+const TEXT_HEADERS = { 'Content-Type': 'text/plain; charset=utf-8' };
+
+export async function get_fichaVcard(request) {
+  try {
+    const id = String((request.query && request.query.id) || '').trim();
+
+    if (!id) {
+      return badRequest({ headers: TEXT_HEADERS, body: 'Falta la ficha de contacto.' });
+    }
+
+    const r = await vcardFichaCore({ id });
+
+    if (!r || !r.ok) {
+      return notFound({ headers: TEXT_HEADERS, body: 'Esta ficha de contacto ya no está disponible.' });
+    }
+
+    return ok({
+      headers: {
+        'Content-Type': 'text/vcard; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${r.archivo}"`,
+        'Cache-Control': 'no-store'
+      },
+      body: r.vcf
+    });
+  } catch (err) {
+    console.error(`${TAG} get_fichaVcard EXCEPTION:`, err);
+    return serverError({ headers: TEXT_HEADERS, body: 'No se ha podido generar el contacto.' });
   }
 }
