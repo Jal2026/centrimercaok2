@@ -1,9 +1,14 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * CENTRIMERCA — Ficha de Contacto · Backend web module · v1.0.0
+ * CENTRIMERCA — Ficha de Contacto · Backend web module · v1.0.1
  * Ruta: backend/centriFichaContacto.web.js
- * FECHA: 14 Octubre 2026
+ * FECHA: 16 Octubre 2026
  *
- * NUEVO. Módulo PÚBLICO de la ficha de contacto de cada persona del equipo.
+ * v1.0.1: el ÁREA se lee de `area1`, el field key real del campo «area» de
+ *   `equipo` (esquema leído con la API de colecciones el 16/10). La v1.0.0
+ *   leía `area`, que no existe: la píldora de la ficha y el ORG de la vCard
+ *   salían sin área. Único cambio: F.area = 'area1'.
+ *
+ * v1.0.0: NUEVO. Módulo PÚBLICO de la ficha de contacto de cada persona del equipo.
  * Va aparte de centriEquipo.web.js a propósito: aquel exige admin en todo;
  * este lo consume cualquier visitante que escanea un QR.
  *
@@ -33,7 +38,7 @@
  * ───────────────────────────────────────────────────────────────────────────
  * FIELD KEYS — esquema de `equipo` confirmado por Jal el 14/10/2026
  * ───────────────────────────────────────────────────────────────────────────
- * nombre (TEXT) · rol (TEXT) · area (TEXT) · descripcion (TEXT)
+ * nombre (TEXT) · rol (TEXT) · area1 (TEXT, rotulado «area») · descripcion (TEXT)
  * imagen (IMAGE) · fotoGeneral (IMAGE) · fotoAgenda (TEXT: empleado|general)
  * email (EMAIL) · numeroTelefono (NUMBER) · web (URL) · direccion (TEXT)
  * slug (TEXT) · activo (BOOLEAN)
@@ -44,7 +49,7 @@ import { webMethod, Permissions } from 'wix-web-module';
 import wixData from 'wix-data';
 import { fetch } from 'wix-fetch';
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const TAG = `[FichaContacto][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -55,7 +60,7 @@ const COL = 'equipo';   // ID real (minúscula), el mismo que centriEquipo.web.j
 const F = {
   nombre:      'nombre',
   rol:         'rol',
-  area:        'area',
+  area:        'area1',         // rotulado «area» en la colección (v1.0.1)
   descripcion: 'descripcion',
   imagen:      'imagen',
   fotoGeneral: 'fotoGeneral',
