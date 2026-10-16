@@ -1,10 +1,18 @@
 /*
  * CENTRIMERCA — Ficha de Contacto · Page Code
  * Página:   ítem dinámica de `equipo`  ·  hoy /equipo/<nombre>, después /equipo/<slug>
- * Archivo:  pega esto en el code panel de esa página        ·  v1.0.2
+ * Archivo:  pega esto en el code panel de esa página        ·  v1.0.3
  *
  * REQUIERE: fichaContacto.js v1.0.4 (acepta imagenOrig / fotoGeneralOrig).
  *           backend/centriFichaContacto.web.js v1.0.1.
+ *
+ * v1.0.3 — LOGOS. LOGO_BLANCO y LOGO_COLOR iban vacíos desde la v1.0.0 y la
+ *   ficha salía sin logo. Ahora llevan los dos logos oficiales de la carpeta
+ *   de logos del sitio, los mismos que usan las plantillas de email, en URL
+ *   CRUDA (~mv2.png):
+ *     LOGO_BLANCO → logo_completo_blanco_color_bitmap.png    (portada)
+ *     LOGO_COLOR  → logo_completo_negro_color_vectorial_v2b.png (pie, móvil)
+ *   Único cambio: esas dos constantes.
  *
  * v1.0.2 — El ÁREA sale de `area1`, el field key real del campo «area» de
  *   `equipo` (esquema leído el 16/10). La v1.0.1 leía `it.area`, que no
@@ -44,11 +52,12 @@
 
 import { obtenerFichaContacto } from 'backend/centriFichaContacto.web.js';
 
-const V           = 'Ficha Contacto Page v1.0.2';
+const V           = 'Ficha Contacto Page v1.0.3';
 const EL_ID       = '#fichaContacto';     // ← Element ID del custom element
 const DATASET_ID  = '#dynamicDataset';    // ← dataset dinámico de la página de ítem
-const LOGO_BLANCO = '';                   // ← URL pública del logo calado en blanco
-const LOGO_COLOR  = '';                   // ← URL pública del logo en color
+// v1.0.3 — logos oficiales, URL CRUDA del Media Manager (nunca /v1/fill/)
+const LOGO_BLANCO = 'https://static.wixstatic.com/media/420ca1_303ae16a97bb41ba9472e88745920255~mv2.png';   // logo_completo_blanco_color_bitmap.png
+const LOGO_COLOR  = 'https://static.wixstatic.com/media/420ca1_8de239dcb57845259d9a9f0a342a97e4~mv2.png';   // logo_completo_negro_color_vectorial_v2b.png
 
 // Enlaces fijos de la ficha (iguales que en centriFichaContacto.web.js)
 const URL_CENTRI        = 'https://www.centrimerca.com/centripro';
