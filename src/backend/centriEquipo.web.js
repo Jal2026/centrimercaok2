@@ -1,9 +1,17 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * CENTRIMERCA — Gestor de Equipo · Backend web module · v1.0.4
+ * CENTRIMERCA — Gestor de Equipo · Backend web module · v1.0.5
  * Ruta: backend/centriEquipo.web.js
- * FECHA: 14 Octubre 2026
+ * FECHA: 16 Octubre 2026
  *
  * REQUIERE: GestorEquipo.page.js v1.0.3 (sin cambios) + gestorequipo v1.0.5.html
+ *
+ * v1.0.5: el ÁREA se lee y se escribe en `area1`.
+ *   - `area1` es el field key real del campo «area» de `equipo` (esquema
+ *     leído con la API de colecciones el 16/10). La v1.0.4 escribía en
+ *     `area`, una clave que no existía, y el CMS la añadió sola como campo
+ *     nuevo. Jal lo ha borrado.
+ *   - Único cambio: F.area = 'area1'. El widget sigue mandando y recibiendo
+ *     `area`: es el nombre dentro del mensaje, no el del campo.
  *
  * v1.0.4: ficha de contacto (centriFichaContacto.web.js + fichaContacto.js).
  *   - Campos nuevos (esquema confirmado por Jal el 14/10): area, web,
@@ -75,7 +83,8 @@
  * nombre (Texto) · rol (Texto) · descripcion (Texto plano) · imagen (Imagen)
  * email (Email, cifrado) · numeroTelefono (NÚMERO) · vcard (URL)
  * qr (Imagen; en los datos guarda una URL de quickchart.io)
- * v1.0.4 (confirmados 14/10): area (TEXT) · web (URL) · direccion (TEXT)
+ * v1.0.4 (confirmados 14/10): web (URL) · direccion (TEXT)
+ * v1.0.5 (leído 16/10): area1 (TEXT, rotulado «area»)
  * slug (TEXT) · fotoAgenda (TEXT: empleado|general) · fotoGeneral (IMAGE)
  * Orden: campo de orden manual de la colección (F.orden), claves de texto en
  *   alfabeto 0-9a-z que se comparan como texto ("0q" < "0qg" < "0r8" < "6").
@@ -98,7 +107,7 @@ import wixData from 'wix-data';
 import { mediaManager } from 'wix-media-backend';
 import { currentMember } from 'wix-members-backend';
 
-const VERSION = '1.0.4';
+const VERSION = '1.0.5';
 const TAG = `[Equipo][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -124,7 +133,7 @@ const F = {
   activo:      'activo',          // "Booleano": visible en la web
   orden:       '_manualSort_70208d3c-3970-4f20-ac00-b50accefda3d',  // orden manual de la colección
   // v1.0.4 — ficha de contacto
-  area:        'area',            // "Texto": área (píldora de la ficha, filtro)
+  area:        'area1',           // "Texto" rotulado «area»: área (píldora de la ficha, filtro). v1.0.5
   web:         'web',             // "URL"
   direccion:   'direccion',       // "Texto"
   slug:        'slug',            // "Texto": lo asigna el sistema, nunca cambia
