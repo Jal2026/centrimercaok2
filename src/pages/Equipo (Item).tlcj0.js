@@ -1,10 +1,14 @@
 /*
  * CENTRIMERCA — Ficha de Contacto · Page Code
  * Página:   ítem dinámica de `equipo`  ·  hoy /equipo/<nombre>, después /equipo/<slug>
- * Archivo:  pega esto en el code panel de esa página        ·  v1.0.1
+ * Archivo:  pega esto en el code panel de esa página        ·  v1.0.2
  *
  * REQUIERE: fichaContacto.js v1.0.4 (acepta imagenOrig / fotoGeneralOrig).
- *           backend/centriFichaContacto.web.js v1.0.0 (sin cambios).
+ *           backend/centriFichaContacto.web.js v1.0.1.
+ *
+ * v1.0.2 — El ÁREA sale de `area1`, el field key real del campo «area» de
+ *   `equipo` (esquema leído el 16/10). La v1.0.1 leía `it.area`, que no
+ *   existe: la píldora del área salía vacía. Único cambio, en _payload.
  *
  * v1.0.1 — CARGA RÁPIDA. Mismo patrón que Productos (Item) v1.1.4:
  *   1. La ficha se arma con el ítem que YA trae el dataset dinámico y se
@@ -22,7 +26,7 @@
  *      válido, se pide al backend (obtenerFichaContacto) SIN bloquear la
  *      ficha y se añade al llegar. Del backend solo se toma el email.
  *
- * ⚠️ _payload es COPIA de centriFichaContacto.web.js v1.0.0 → _payload
+ * ⚠️ _payload es COPIA de centriFichaContacto.web.js v1.0.1 → _payload
  *    (teléfono, web, mapa, enlaces). Si cambias uno, cambia el otro.
  *
  * ⚠️ AJUSTES DE ESTA PÁGINA (una sola vez, los hace el desarrollador):
@@ -40,7 +44,7 @@
 
 import { obtenerFichaContacto } from 'backend/centriFichaContacto.web.js';
 
-const V           = 'Ficha Contacto Page v1.0.1';
+const V           = 'Ficha Contacto Page v1.0.2';
 const EL_ID       = '#fichaContacto';     // ← Element ID del custom element
 const DATASET_ID  = '#dynamicDataset';    // ← dataset dinámico de la página de ítem
 const LOGO_BLANCO = '';                   // ← URL pública del logo calado en blanco
@@ -118,7 +122,7 @@ function _webVer(url) {
 
 function _emailValido(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
 
-// COPIA de centriFichaContacto.web.js v1.0.0 → _payload (+ fotos reducidas).
+// COPIA de centriFichaContacto.web.js v1.0.1 → _payload (+ fotos reducidas).
 function _payload(it) {
   const tel     = _telefono(it.numeroTelefono);
   const email   = _txt(it.email);
@@ -132,7 +136,7 @@ function _payload(it) {
     ok:          true,
     nombre:      _txt(it.nombre),
     rol:         _txt(it.rol),
-    area:        _txt(it.area),
+    area:        _txt(it.area1),   // v1.0.2 — campo «area», key area1
     descripcion: _txt(it.descripcion),
     imagen:          retrato.src,
     imagenOrig:      retrato.orig,
