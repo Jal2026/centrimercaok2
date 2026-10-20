@@ -1,8 +1,15 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI · Endpoints HTTP
  * Archivo:  backend/http-functions.js
- * VERSION:  1.0.3
+ * VERSION:  1.0.4
  * FECHA:    21 Octubre 2026
+ *
+ * v1.0.4 — ADITIVO Y TEMPORAL: nuevo POST /_functions/centriSalesLabInforme
+ *   (banco de pruebas de Centri Sales: informe de la visita con IA). Añade
+ *   informePruebaCore al import de centriSalesLab.web y el bloque del
+ *   endpoint al final. Nada más cambia.
+ *   ⛔ ORDEN: backend/centriSalesLab.web.js v1.1.0 PRIMERO, este archivo
+ *   DESPUÉS. Si informePruebaCore no existe aún, caen TODOS los endpoints.
  *
  * v1.0.3 — ADITIVO Y TEMPORAL: nuevo POST /_functions/centriSalesLabTranscribir
  *   (banco de pruebas de Centri Sales, modo «Grabar y transcribir»). Añade el
@@ -74,7 +81,8 @@ import { centriSynthesizeCore } from 'backend/centriTTS.web';
 // v1.0.2 — Ficha de contacto. ⛔ centriFichaContacto.web.js debe estar desplegado ANTES.
 import { vcardFichaCore } from 'backend/centriFichaContacto.web';
 // v1.0.3 — Banco de pruebas de Centri Sales (TEMPORAL). ⛔ centriSalesLab.web.js debe estar desplegado ANTES.
-import { transcribirPruebaCore } from 'backend/centriSalesLab.web';
+// v1.0.4 — + informePruebaCore. ⛔ centriSalesLab.web.js v1.1.0 debe estar desplegado ANTES.
+import { transcribirPruebaCore, informePruebaCore } from 'backend/centriSalesLab.web';
 
 // ⛔ NO DESCOMENTAR HASTA QUE backend/centriTTS.web.js ESTÉ DESPLEGADO.
 //
@@ -264,6 +272,44 @@ export async function post_centriSalesLabTranscribir(request) {
     return serverError({
       headers: JSON_HEADERS,
       body: JSON.stringify({ ok: false, error: 'Error técnico transcribiendo el audio.' })
+    });
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * POST /_functions/centriSalesLabInforme              · v1.0.4 (TEMPORAL)
+ *
+ * Banco de pruebas de Centri Sales: convierte la transcripción del reporte en
+ * el informe de la visita (Claude Haiku, taxonomía cerrada). Lo llama el
+ * custom element centri-sales-lab v1.0.4 después de transcribir, en una
+ * petición aparte para que cada una quede por debajo del corte de ~14 s.
+ *
+ * Cuerpo: { texto, cliente: { nombre, tipo, zona } }
+ * Respuesta: { ok, informe, modelo, timeMs, tokens } | { ok: false, error }
+ *
+ * ⚠️ Público y sin sesión: informePruebaCore limita el texto y los tokens.
+ * Quitar este bloque y su import al terminar la prueba.
+ * ─────────────────────────────────────────────────────────────────────────── */
+export async function post_centriSalesLabInforme(request) {
+  try {
+    const body = await request.body.json();
+    const { texto, cliente } = body || {};
+
+    if (!texto) {
+      return badRequest({
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ ok: false, error: 'texto requerido' })
+      });
+    }
+
+    const result = await informePruebaCore({ texto, cliente });
+
+    return ok({ headers: JSON_HEADERS, body: JSON.stringify(result) });
+  } catch (err) {
+    console.error(`${TAG} post_centriSalesLabInforme EXCEPTION:`, err);
+    return serverError({
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ ok: false, error: 'Error técnico preparando el informe.' })
     });
   }
 }
