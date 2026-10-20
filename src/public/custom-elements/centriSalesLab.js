@@ -2,8 +2,45 @@
  * CENTRIMERCA — CENTRI SALES · Banco de pruebas (Wix Custom Element)
  * Archivo:  public/custom-elements/centriSalesLab.js
  * Tag name: centri-sales-lab
- * VERSION:  1.0.1
- * FECHA:    20 Octubre 2026
+ * VERSION:  1.0.2
+ * FECHA:    21 Octubre 2026
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * CAMBIOS v1.0.1 → v1.0.2 — GRABAR Y TRANSCRIBIR EN SERVIDOR
+ * ───────────────────────────────────────────────────────────────────────────
+ *   Resultado de las pruebas en Android (20-oct-2026):
+ *     · «Largo por frases»: texto correcto, pero el motor se cierra en cada
+ *       pausa (5 cortes en 56 s) y Android pita al cerrar y al abrir. Los
+ *       comerciales lo tomarían por un error. La página no puede quitar los
+ *       pitidos ni alargar la pausa: la Web Speech API no tiene esa opción y
+ *       el reconocimiento en el dispositivo (processLocally), que la cambiaría,
+ *       no existe en Android.
+ *     · «Largo continuo»: 1 corte en 51 s, pero cada resultado repite la
+ *       frase entera desde el principio (1.881 palabras para ~90). Es el
+ *       fallo que ya resolvieron AKIRA y EGAEL +50: en Android, NUNCA
+ *       continuous = true.
+ *   Cambios:
+ *   1. FUERA «Largo continuo» y _unirFinales(). El dictado largo vuelve a
+ *      unir los resultados como v1.0.0.
+ *   2. collapseRepetitions() y stripAccents(): COPIA LITERAL de
+ *      egaelConsole50.js v1.1.1 (EGAEL +50, motor de voz de AKIRA v0.6.4).
+ *      Se aplican como allí: solo en la sesión estándar (iPhone y
+ *      ordenador), al cerrar cada sesión del motor. Android no lo necesita.
+ *   3. MODO NUEVO «Grabar y transcribir» (sale marcado al abrir). Graba con
+ *      MediaRecorder a AUDIO_BPS, sin dictado del navegador: sin cortes ni
+ *      pitidos. Al pulsar Terminar envía el audio a
+ *      /_functions/centriSalesLabTranscribir (Google Speech-to-Text V1,
+ *      backend/centriSalesLab.web.js) y muestra el texto, la espera y los
+ *      segundos facturados.
+ *      La transcripción síncrona de Google admite como máximo 1 minuto por
+ *      petición: la grabación se parte sola en segmentos de SEGMENTO_MS y
+ *      cada segmento se transcribe por separado (en paralelo).
+ *      ⚠️ En iPhone, Safari graba en audio/mp4 (AAC) y Google V1 no lo
+ *      admite. El backend lo rechaza con un mensaje claro: para iPhone hará
+ *      falta convertir el audio antes de enviarlo (trabajo aparte).
+ *   4. «Largo por frases» pasa a llamarse «Dictado por frases».
+ *   Ya NO es cierto que el banco no tenga backend: el modo 3 sí lo usa. Los
+ *   demás modos siguen sin enviar nada fuera del móvil.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * CAMBIOS v1.0.0 → v1.0.1 (primeras pruebas en Android)
@@ -45,8 +82,9 @@
  * cada comercial lo que Centri Sales necesita del navegador, antes de
  * construir nada de backend:
  *
- *   1. DICTADO, en tres modos sobre la misma Web Speech API (v1.0.1; ver
- *      CAMBIOS para «Largo continuo»):
+ *   1. REPORTE POR VOZ, en tres modos (v1.0.2): «Como CENTRI hoy» y
+ *      «Dictado por frases» sobre la Web Speech API, y «Grabar y transcribir»
+ *      (ver CAMBIOS v1.0.2):
  *      · «Como CENTRI hoy»: COPIA LITERAL del micrófono de centriConsole.js
  *        v1.0.4 (portado de EGAEL +50). Envía tras SILENCE_MS de silencio y
  *        en Android trabaja frase a frase (continuous = false).
@@ -65,8 +103,9 @@
  *   5. INFORME: todo lo anterior + registro de eventos, en un texto que se
  *      copia y se pega por WhatsApp o email.
  *
- * NO tiene backend, NO escribe en ninguna colección, NO envía nada fuera del
- * móvil. Todo queda en memoria de la página y se pierde al recargar.
+ * NO escribe en ninguna colección. Solo el modo «Grabar y transcribir»
+ * (v1.0.2) envía audio fuera del móvil, al endpoint de transcripción. Todo lo
+ * demás queda en memoria de la página y se pierde al recargar.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * PROCEDENCIA DEL CÓDIGO
@@ -83,7 +122,12 @@
  *     misma interfaz value/placeholder, y _sendQuery por _finCentri.
  *   · copiarAlPortapapeles(): copia literal de widgetAnalizador 1.0.3
  *     (CATHOVIA), pasada a método.
- *   · Dictado largo, grabación, ubicación, foto e informe: código nuevo.
+ *   · collapseRepetitions() y stripAccents(): copia literal de
+ *     egaelConsole50.js v1.1.1 (v1.0.2).
+ *   · Llamada al endpoint: mismo patrón que _fetchTts / _functionsUrl de
+ *     centriConsole.js v1.0.4 (fetch POST JSON a ruta absoluta /_functions/).
+ *   · Dictado largo, grabación, transcripción, ubicación, foto e informe:
+ *     código nuevo.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * MONTAJE
@@ -91,6 +135,8 @@
  *   Página de prueba oculta (fuera del menú), con SOLO este elemento.
  *   Custom element → archivo public/custom-elements/centriSalesLab.js,
  *   tag name centri-sales-lab. No necesita page code.
+ *   El modo «Grabar y transcribir» necesita además (v1.0.2):
+ *     backend/centriSalesLab.web.js v1.0.0 y http-functions.js v1.0.3.
  *   ⚠️ Probarlo como custom element, NUNCA dentro de un HtmlComponent
  *      (iframe): el micrófono de CENTRI está probado así y un iframe puede
  *      no tener permiso de micrófono ni de ubicación.
@@ -105,7 +151,7 @@
     return;
   }
 
-  const VERSION = '1.0.1';
+  const VERSION = '1.0.2';
   const TAG = `[CENTRI SALES LAB v${VERSION}]`;
 
   // ── Micrófono, modo «Como CENTRI hoy» — mismos valores que centriConsole v1.0.4 ──
@@ -116,6 +162,15 @@
   // ── Dictado largo ──
   const RELANZAR_MS    = 150;           // pausa antes de relanzar el motor cuando corta
   const MAX_DICTADO_MS = 10 * 60000;    // tope de seguridad: 10 minutos
+
+  // ── Grabar y transcribir (v1.0.2) ──
+  // Ruta absoluta, como CENTRI: functionsBase vacío = '/_functions/...'.
+  const ENDPOINT_TRANSCRIBIR = '/_functions/centriSalesLabTranscribir';
+  // Google V1 síncrono: máximo 1 minuto por petición. Margen de 5 s.
+  const SEGMENTO_MS = 55000;
+  // Opus a 32 kbps sobra para voz y deja ~220 KB por segmento (la prueba de
+  // v1.0.0 grabó a 127 kbps sin fijarlo).
+  const AUDIO_BPS = 32000;
 
   // ── Grabación ── (orden de preferencia; el móvil dice cuáles admite)
   const MIME_CANDIDATOS = [
@@ -238,9 +293,9 @@
   }
 
   const NOMBRE_MODO = {
-    centri:   'CENTRI hoy',
-    largo:    'Largo por frases',
-    continuo: 'Largo continuo'
+    centri:      'CENTRI hoy',
+    largo:       'Dictado por frases',
+    transcribir: 'Grabar y transcribir'
   };
   function textoModo(m) { return NOMBRE_MODO[m] || m; }
 
@@ -251,39 +306,38 @@
     const comun = ' Tocar el micrófono no lo para: usa Terminar.';
     if (m === 'largo') {
       return (IS_ANDROID
-        ? 'El de la primera versión: en Android el motor se cierra en cada pausa y se relanza solo (con su pitido). Acumula hasta Terminar.'
-        : 'No se corta con las pausas: acumula hasta Terminar. Si el motor corta, se relanza solo.') + comun;
+        ? 'Dictado del navegador: en Android el motor se cierra en cada pausa y se relanza solo (con su pitido). Acumula hasta Terminar.'
+        : 'Dictado del navegador: no se corta con las pausas, acumula hasta Terminar. Si el motor corta, se relanza solo.') + comun;
     }
-    return (IS_ANDROID
-      ? 'Pide al motor que no se cierre en las pausas. Si aun así corta, se relanza. Compara cortes y pitidos con «Largo por frases».'
-      : 'En este dispositivo es igual que «Largo por frases»: el motor ya trabaja en continuo.') + comun;
+    return 'Graba sin dictado del navegador: sin cortes ni pitidos. Al pulsar Terminar, el audio se envía al servidor y el texto llega unos segundos después.' + comun;
   }
 
-  function normalizar(s) {
-    return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  // ── COPIA LITERAL de egaelConsole50.js v1.1.1 (EGAEL +50) — v1.0.2 ──
+  function stripAccents(s) {
+    return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   }
+  function collapseRepetitions(text) {
+    if (!text) return text;
+    const words = text.split(/\s+/); if (words.length < 2) return text;
+    const out = []; let prev = '';
+    for (const w of words) { const key = stripAccents(w); if (key && key === prev) continue; out.push(w); prev = key; }
+    let result = out.join(' ');
+    for (let n = 5; n >= 2; n--) { result = result.replace(new RegExp(`(\\b(?:\\S+\\s+){${n-1}}\\S+\\b)(?:\\s+\\1)+`,'gi'), '$1'); }
+    return result.trim();
+  }
+  // ── fin de la copia literal ──
 
-  /**
-   * Une los resultados finales de UNA sesión del motor.
-   * Caso normal: cada final es un trozo nuevo y se encadenan.
-   * Caso a vigilar (continuo en Android, no comprobado): un final que
-   * contiene al texto anterior (acumulativo) o que lo repite. No se duplica
-   * el texto y se cuenta en `duplicados`.
-   */
-  function unirFinales(results) {
-    let texto = '';
-    let duplicados = 0;
-    for (let i = 0; i < results.length; i++) {
-      if (!results[i].isFinal) continue;
-      const t = String(results[i][0].transcript || '').trim();
-      if (!t) continue;
-      if (!texto) { texto = t; continue; }
-      const a = normalizar(texto), b = normalizar(t);
-      if (b.indexOf(a) === 0) { texto = t; duplicados++; }        // acumulativo
-      else if (a.slice(-b.length) === b) { duplicados++; }         // repetido
-      else texto += ' ' + t;
-    }
-    return { texto, duplicados };
+  function blobABase64(blob) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => {
+        const s = String(fr.result || '');
+        const i = s.indexOf(',');
+        resolve(i >= 0 ? s.slice(i + 1) : s);
+      };
+      fr.onerror = () => reject(fr.error || new Error('No se pudo leer el audio'));
+      fr.readAsDataURL(blob);
+    });
   }
 
   const ERRORES_DICTADO = {
@@ -327,12 +381,13 @@
       this._lastFinalTranscript = '';
 
       // Banco de pruebas
-      this._modoDictado = 'continuo';    // 'centri' | 'largo' | 'continuo'
+      this._modoDictado = 'transcribir'; // 'centri' | 'largo' | 'transcribir'
       this._grabarALaVez = false;
       this._dictado = null;              // prueba en curso
       this._pruebasDictado = [];         // pruebas terminadas
       this._causaFin = '';
       this._largo = null;
+      this._trans = null;                // grabación en curso del modo «Grabar y transcribir»
 
       this._grab = null;                 // grabación en curso
       this._grabaciones = [];            // grabaciones terminadas
@@ -352,7 +407,16 @@
       this._render();
       this._bindEvents();
       this._setupMic();
-      if (!this._SR) this._pintarEstadoDictado('Este navegador no tiene dictado. Prueba con Chrome (Android) o Safari (iPhone).');
+      if (!this._SR) {
+        // _setupMic (literal de CENTRI) oculta el micrófono si no hay dictado.
+        // «Grabar y transcribir» no lo necesita: se vuelve a mostrar y se
+        // desactivan solo los modos de dictado.
+        const b = this.shadowRoot.getElementById('micBtn');
+        if (b) b.style.display = '';
+        this.shadowRoot.querySelectorAll('[data-modo="centri"], [data-modo="largo"]').forEach((x) => { x.disabled = true; x.dataset.sinDictado = '1'; });
+        this._registrar('warn', 'Este navegador no tiene dictado: solo se puede probar «Grabar y transcribir»');
+      }
+      this._pintarModo();
       this._diagnostico();
       this._registrar('info', `Banco de pruebas v${VERSION} listo`);
     }
@@ -360,6 +424,14 @@
     disconnectedCallback() {
       try { if (this._largo) this._largo.activo = false; } catch (_) {}
       try { this._stopMic(); } catch (_) {}
+      try {
+        if (this._trans) {
+          this._trans.activo = false;
+          clearTimeout(this._trans.timer);
+          if (this._trans.rec && this._trans.rec.state !== 'inactive') this._trans.rec.stop();
+          this._trans.stream.getTracks().forEach((t) => t.stop());
+        }
+      } catch (_) {}
       try { if (this._grab && this._grab.rec.state !== 'inactive') this._grab.rec.stop(); } catch (_) {}
       try { if (this._grab && this._grab.stream) this._grab.stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
       this._pararTick();
@@ -482,6 +554,17 @@
     }
 
     _onMicClick() {
+      if (this._modoDictado === 'transcribir') {
+        // v1.0.2: igual que los modos largos, con la prueba abierta el micrófono no termina.
+        if (this._dictado || this._trans) {
+          if (this._dictado) this._dictado.toquesIgnorados++;
+          this._registrar('warn', 'Toque en el micrófono ignorado (para terminar, usa Terminar)');
+          return;
+        }
+        this._empezarPruebaDictado();
+        this._empezarTranscribir();
+        return;
+      }
       if (!this._SR) {
         this._registrar('error', 'Este navegador no tiene dictado (Web Speech API)');
         return;
@@ -510,7 +593,31 @@
         this._stopMic();
         return;
       }
+      if (this._modoDictado === 'transcribir') {
+        this._terminarTranscribir();
+        return;
+      }
       this._terminarLargo('usuario');
+    }
+
+    /** Marca el modo activo, su ayuda y si la casilla «Grabar a la vez» tiene sentido. */
+    _pintarModo() {
+      const r = this.shadowRoot;
+      r.querySelectorAll('[data-modo]').forEach((x) => {
+        const on = x.dataset.modo === this._modoDictado;
+        x.classList.toggle('on', on);
+        x.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      const ay = r.getElementById('modoAyuda');
+      if (ay) ay.textContent = ayudaModo(this._modoDictado);
+      const chk = r.getElementById('chkALaVez');
+      const fila = r.getElementById('filaALaVez');
+      const transcribir = this._modoDictado === 'transcribir';
+      if (chk) {
+        if (transcribir) { chk.checked = false; this._grabarALaVez = false; }
+        chk.disabled = transcribir || !!this._dictado;
+      }
+      if (fila) fila.classList.toggle('apagada', transcribir);
     }
 
     _mostrarTerminar(b) {
@@ -533,8 +640,15 @@
         sordoTotal: 0,
         sordoMax: 0,
         sinVoz: 0,
-        duplicados: 0,
         toquesIgnorados: 0,
+        // «Grabar y transcribir» (v1.0.2)
+        segmentos: 0,
+        bytes: 0,
+        formato: '',
+        msAudio: 0,
+        esperaMs: 0,
+        facturadoS: 0,
+        modelo: '',
         errores: [],
         causa: ''
       };
@@ -543,7 +657,7 @@
       this._mostrarTerminar(true);
       this._arrancarTick();
       this._registrar('info', `Dictado: empieza (modo ${textoModo(this._modoDictado)}${this._grabarALaVez ? ', grabando a la vez' : ''})`);
-      if (this._grabarALaVez) this._grabarEmpezar('respaldo del dictado');
+      if (this._grabarALaVez && this._modoDictado !== 'transcribir') this._grabarEmpezar('respaldo del dictado');
     }
 
     _cerrarPruebaDictado(texto, causa) {
@@ -558,8 +672,9 @@
       this._mostrarTerminar(false);
       if (this._grab && this._grab.origen === 'respaldo del dictado') this._grabarParar();
       this._registrar('info', `Dictado: termina por ${this._textoCausa(d.causa)} · ${mmss(d.fin - d.inicio)} · ${textoPalabras(d.texto)}`);
+      this._pintarModo();   // _bloquearOpcionesDictado(false) reactiva la casilla también en «Grabar y transcribir»
       this._pintarTextoDictado(d.texto, '');
-      this._pintarEstadoDictado(d.texto ? 'Prueba guardada. Puedes repetirla o cambiar de modo.' : 'No se recogió texto.');
+      this._pintarEstadoDictado(d.texto ? 'Prueba guardada. Puedes repetirla o cambiar de modo.' : (d.errores.length ? 'La prueba terminó con errores: mira el registro.' : 'No se recogió texto.'));
       this._pintarMetricasDictado();
       this._pintarPruebasDictado();
       this._pararTickSiInactivo();
@@ -576,7 +691,10 @@
     }
 
     _bloquearOpcionesDictado(b) {
-      this.shadowRoot.querySelectorAll('[data-modo], #chkALaVez').forEach((el) => { el.disabled = b; });
+      this.shadowRoot.querySelectorAll('[data-modo], #chkALaVez').forEach((el) => {
+        // Los modos de dictado siguen apagados si el navegador no tiene dictado
+        el.disabled = b || el.dataset.sinDictado === '1';
+      });
     }
 
     _pintarMetricasDictado() {
@@ -587,6 +705,18 @@
       const fin = d.fin || Date.now();
       const texto = d.fin ? d.texto : (this._textoEnCurso() || '');
       const m = (v, l) => `<div class="met"><div class="mv">${this._escape(v)}</div><div class="ml">${this._escape(l)}</div></div>`;
+      if (d.modo === 'transcribir') {
+        const tr = this._trans;
+        const msAudio = d.msAudio || (tr && tr.inicio ? Date.now() - tr.inicio : 0);
+        box.innerHTML =
+          m(mmss(msAudio), 'audio') +
+          m(contarPalabras(texto), 'palabras') +
+          m(d.segmentos || (tr ? tr.nSeg : 0), 'segmentos') +
+          m(d.esperaMs ? segundos(d.esperaMs) : '—', 'espera del texto') +
+          m(d.bytes ? kb(d.bytes) : (tr ? kb(tr.bytes) : '—'), 'enviado') +
+          m(d.errores.length, 'errores');
+        return;
+      }
       box.innerHTML =
         m(mmss(fin - d.inicio), 'duración') +
         m(contarPalabras(texto), 'palabras') +
@@ -611,7 +741,9 @@
         this._pruebasDictado.map((d, i) =>
           `<div class="prueba">
              <div class="prueba-h">#${i + 1} · ${this._escape(textoModo(d.modo))}${d.grabarALaVez ? ' + grabación' : ''}</div>
-             <div class="prueba-d">${mmss(d.fin - d.inicio)} · ${textoPalabras(d.texto)} · terminó por ${this._escape(this._textoCausa(d.causa))}${d.modo !== 'centri' ? ` · ${d.cortes} cortes · ${segundos(d.sordoTotal)} sordo` : ''}${d.toquesIgnorados ? ` · ${d.toquesIgnorados} ${d.toquesIgnorados === 1 ? 'toque ignorado' : 'toques ignorados'}` : ''}${d.duplicados ? ` · ${d.duplicados} ${d.duplicados === 1 ? 'duplicado corregido' : 'duplicados corregidos'}` : ''}${d.errores.length ? ` · errores: ${this._escape(d.errores.join(', '))}` : ''}</div>
+             <div class="prueba-d">${d.modo === 'transcribir'
+               ? `${mmss(d.msAudio)} de audio · ${textoPalabras(d.texto)} · ${d.segmentos} ${d.segmentos === 1 ? 'segmento' : 'segmentos'} · texto en ${segundos(d.esperaMs)} · ${kb(d.bytes)}`
+               : `${mmss(d.fin - d.inicio)} · ${textoPalabras(d.texto)} · terminó por ${this._escape(this._textoCausa(d.causa))}${d.modo !== 'centri' ? ` · ${d.cortes} cortes · ${segundos(d.sordoTotal)} sordo` : ''}`}${d.toquesIgnorados ? ` · ${d.toquesIgnorados} ${d.toquesIgnorados === 1 ? 'toque ignorado' : 'toques ignorados'}` : ''}${d.errores.length ? ` · errores: ${this._escape(d.errores.join(', '))}` : ''}</div>
            </div>`
         ).join('');
     }
@@ -801,12 +933,12 @@
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // DICTADO — modos largos (NUEVO)
+    // DICTADO — «Dictado por frases» (NUEVO)
     //
-    // «Largo por frases»: mismos ajustes del motor que CENTRI por plataforma
+    // Mismos ajustes del motor que CENTRI y EGAEL +50 por plataforma
     // (Android: frase a frase y sin provisionales; resto: continuo con
-    // provisionales). «Largo continuo» (v1.0.1): continuo con provisionales
-    // en todas las plataformas. En los dos:
+    // provisionales). ⛔ NUNCA continuous = true en Android: probado en v1.0.1
+    // («Largo continuo»), cada resultado repite la frase entera. Además:
     //   · sin temporizador de silencio: solo termina con Terminar, un error
     //     fatal o el tope de MAX_DICTADO_MS;
     //   · cuando el motor corta por su cuenta, se consolida el texto de esa
@@ -818,7 +950,6 @@
     _empezarLargo() {
       this._largo = {
         activo: true,
-        continuo: this._modoDictado === 'continuo',
         texto: '',
         sesiones: 0,
         sordoDesde: 0,
@@ -843,12 +974,11 @@
       }
       this._recognition = rec;
       rec.lang = 'es-ES';
-      rec.interimResults = L.continuo ? true : !IS_ANDROID;
-      rec.continuous = L.continuo ? true : !IS_ANDROID;
+      rec.interimResults = !IS_ANDROID;
+      rec.continuous = !IS_ANDROID;
       rec.maxAlternatives = 1;
 
       let finalSesion = '';
-      let dupSesion = 0;
       let errorFatal = false;
 
       // Una sesión que arranca cuando la prueba ya se cerró (Terminar pulsado
@@ -882,13 +1012,14 @@
       };
       rec.onresult = (event) => {
         if (this._largo !== L) return;
-        let provisional = '';
+        // v1.0.2: unión de resultados de v1.0.0 (la de EGAEL +50 / CENTRI).
+        let fin = '', provisional = '';
         for (let i = 0; i < event.results.length; i++) {
-          if (!event.results[i].isFinal) provisional += event.results[i][0].transcript;
+          const t = event.results[i][0].transcript;
+          if (event.results[i].isFinal) fin += t;
+          else provisional += t;
         }
-        const u = unirFinales(event.results);
-        finalSesion = u.texto;
-        dupSesion = u.duplicados;
+        finalSesion = fin.trim();
         L.enCurso = finalSesion;   // para que las métricas cuenten la sesión abierta
         const base = L.texto + (L.texto && finalSesion ? ' ' : '') + finalSesion;
         this._pintarTextoDictado(base, provisional.trim());
@@ -915,13 +1046,11 @@
       rec.onend = () => {
         if (this._largo !== L) return;
         this._isListening = false;
+        // v1.0.2: como EGAEL +50, collapseRepetitions solo en la sesión
+        // estándar (iPhone y ordenador), al cerrar cada sesión del motor.
+        if (finalSesion && !IS_ANDROID) finalSesion = collapseRepetitions(finalSesion);
         if (finalSesion) L.texto += (L.texto ? ' ' : '') + finalSesion;
-        if (this._dictado && dupSesion) {
-          this._dictado.duplicados += dupSesion;
-          this._registrar('warn', `Dictado: ${dupSesion} resultado(s) repetido(s) del motor corregido(s)`);
-        }
         finalSesion = '';
-        dupSesion = 0;
         L.enCurso = '';
         this._pintarTextoDictado(L.texto, '');
         if (L.activo && !errorFatal) {
@@ -976,6 +1105,221 @@
       const causa = this._causaFin || 'motor';
       this._causaFin = '';
       this._cerrarPruebaDictado(L.texto, causa);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // «GRABAR Y TRANSCRIBIR» (v1.0.2)
+    //
+    // Graba con MediaRecorder (sin dictado del navegador: sin cortes ni
+    // pitidos) y, al pulsar Terminar, envía el audio al servidor.
+    //
+    // SEGMENTOS: Google V1 síncrono acepta 1 minuto como máximo por petición.
+    // A los SEGMENTO_MS se abre un grabador nuevo sobre el mismo micrófono
+    // ANTES de cerrar el anterior, para no perder palabras en el cambio (el
+    // solape es de milisegundos). Cada segmento es un archivo completo y se
+    // transcribe por separado; los textos se unen en orden.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    async _empezarTranscribir() {
+      if (!(window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+        this._registrar('error', 'Grabar y transcribir: este navegador no permite grabar audio');
+        if (this._dictado) this._dictado.errores.push('el navegador no permite grabar');
+        this._cerrarPruebaDictado('', 'error');
+        return;
+      }
+      const T = {
+        activo: true, stream: null, rec: null, timer: null, mime: '',
+        inicio: 0, nSeg: 0, abiertos: 0, segmentos: [], bytes: 0
+      };
+      this._trans = T;
+      const b = this.shadowRoot.getElementById('micBtn');
+      if (b) b.classList.add('largo');
+      this._setMicState('preparing');
+      this._pintarEstadoDictado('Preparando micrófono…');
+
+      let stream;
+      try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+      catch (e) {
+        this._transFallo(T, `no se pudo abrir el micrófono (${(e && e.name) || 'error'})`);
+        return;
+      }
+      if (this._trans !== T || !T.activo) {
+        // Terminar pulsado mientras se pedía el permiso
+        try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+        this._transFallo(T, 'terminado antes de empezar a grabar');
+        return;
+      }
+      T.stream = stream;
+      try { T.mime = MIME_CANDIDATOS.find((t) => MediaRecorder.isTypeSupported(t)) || ''; } catch (_) { T.mime = ''; }
+      T.inicio = Date.now();
+      if (!this._transSegmento(T)) return;
+      this._setMicState('listening');
+      this._pintarEstadoDictado('Grabando. Habla con normalidad, con tus pausas. Pulsa Terminar al acabar.');
+      if (navigator.vibrate) { try { navigator.vibrate(50); } catch (_) {} }
+      this._registrar('info', `Grabar y transcribir: grabando · formato ${T.mime || 'por defecto del navegador'} · ${AUDIO_BPS / 1000} kbps pedidos`);
+    }
+
+    /** Abre un segmento nuevo. Devuelve false si no se pudo crear el grabador. */
+    _transSegmento(T) {
+      const opts = { audioBitsPerSecond: AUDIO_BPS };
+      if (T.mime) opts.mimeType = T.mime;
+      let rec;
+      try { rec = new MediaRecorder(T.stream, opts); }
+      catch (e) {
+        try { rec = new MediaRecorder(T.stream); }
+        catch (e2) { this._transFallo(T, `no se pudo crear el grabador (${(e2 && e2.name) || 'error'})`); return false; }
+      }
+      const seg = { n: T.nSeg++, trozos: [], inicio: Date.now(), mime: rec.mimeType || T.mime || '' };
+      T.rec = rec;
+      T.abiertos++;
+      rec.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size) { seg.trozos.push(ev.data); T.bytes += ev.data.size; }
+      };
+      rec.onerror = (ev) => {
+        this._registrar('error', `Grabar y transcribir: error del grabador (${(ev && ev.error && ev.error.name) || 'desconocido'})`);
+      };
+      rec.onstop = () => {
+        T.abiertos--;
+        const blob = new Blob(seg.trozos, { type: seg.mime || 'audio/webm' });
+        T.segmentos[seg.n] = { blob, ms: Date.now() - seg.inicio, mime: blob.type };
+        if (!T.activo && T.abiertos === 0) this._transEnviar(T);
+      };
+      try { rec.start(1000); }
+      catch (e) {
+        T.abiertos--;
+        this._transFallo(T, `el grabador no arrancó (${(e && e.name) || 'error'})`);
+        return false;
+      }
+      T.timer = setTimeout(() => {
+        if (!T.activo || T.rec !== rec) return;
+        this._registrar('info', `Grabar y transcribir: segmento ${seg.n + 1} cerrado a los ${SEGMENTO_MS / 1000} s, sigue en el ${seg.n + 2}`);
+        // El siguiente empieza ANTES de cerrar este: sin hueco en el cambio.
+        if (!this._transSegmento(T)) return;
+        try { rec.stop(); } catch (_) {}
+      }, SEGMENTO_MS);
+      return true;
+    }
+
+    _terminarTranscribir() {
+      const T = this._trans;
+      if (!T || !T.activo) return;
+      T.activo = false;
+      clearTimeout(T.timer);
+      this._pintarEstadoDictado('Terminando…');
+      if (!T.rec) return;   // aún pidiendo permiso: lo cierra _empezarTranscribir
+      try {
+        if (T.rec.state !== 'inactive') T.rec.stop();
+        else if (T.abiertos === 0) this._transEnviar(T);
+      } catch (_) {
+        if (T.abiertos === 0) this._transEnviar(T);
+      }
+    }
+
+    _transFallo(T, msg) {
+      T.activo = false;
+      clearTimeout(T.timer);
+      try { if (T.stream) T.stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+      if (this._trans === T) this._trans = null;
+      this._setMicState('idle');
+      const b = this.shadowRoot.getElementById('micBtn');
+      if (b) b.classList.remove('largo');
+      this._registrar('error', `Grabar y transcribir: ${msg}`);
+      if (this._dictado) {
+        this._dictado.errores.push(msg);
+        this._cerrarPruebaDictado('', 'error');
+      }
+    }
+
+    async _transEnviar(T) {
+      if (T.enviado) return;
+      T.enviado = true;
+      try { T.stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+      this._setMicState('idle');
+      const b = this.shadowRoot.getElementById('micBtn');
+      if (b) b.classList.remove('largo');
+      this._mostrarTerminar(false);
+
+      const d = this._dictado;
+      const segs = T.segmentos.filter(Boolean);
+      if (d) {
+        d.segmentos = segs.length;
+        d.bytes = segs.reduce((a, s) => a + s.blob.size, 0);
+        d.msAudio = segs.reduce((a, s) => a + s.ms, 0);
+        d.formato = segs.length ? segs[0].mime : '';
+      }
+      segs.forEach((s, i) => this._anadirGrabacion(`grabar y transcribir · segmento ${i + 1}`, s.blob, s.ms));
+
+      if (!segs.length || !segs.some((s) => s.blob.size > 0)) {
+        this._trans = null;
+        if (d) d.errores.push('no se grabó audio');
+        this._registrar('error', 'Grabar y transcribir: no se grabó audio');
+        this._cerrarPruebaDictado('', 'error');
+        return;
+      }
+
+      this._pintarEstadoDictado(`Transcribiendo ${segs.length === 1 ? 'el audio' : 'los ' + segs.length + ' segmentos'}…`);
+      this._pintarMetricasDictado();
+      this._registrar('info', `Grabar y transcribir: envío ${segs.length} ${segs.length === 1 ? 'segmento' : 'segmentos'} · ${kb(d ? d.bytes : 0)} · ${(d && d.formato) || 'formato desconocido'}`);
+
+      const t0 = Date.now();
+      const res = await Promise.all(segs.map((s, i) => this._transcribirSegmento(s, i)));
+      if (d) {
+        d.esperaMs = Date.now() - t0;
+        d.facturadoS = res.reduce((a, r) => a + (r.facturadoS || 0), 0);
+        d.modelo = (res.find((r) => r.modelo) || {}).modelo || '';
+      }
+      const texto = res.map((r) => r.texto).filter(Boolean).join(' ');
+      this._trans = null;
+      this._cerrarPruebaDictado(texto, texto ? 'usuario' : 'error');
+    }
+
+    async _transcribirSegmento(s, i) {
+      const d = this._dictado;
+      const anotar = (msg) => {
+        if (d) d.errores.push(`segmento ${i + 1}: ${msg}`);
+        this._registrar('error', `Transcripción, segmento ${i + 1}: ${msg}`);
+        return { texto: '' };
+      };
+      try {
+        const audio = await blobABase64(s.blob);
+        const t0 = Date.now();
+        // Mismo patrón que _fetchTts de centriConsole.js v1.0.4
+        const res = await fetch(ENDPOINT_TRANSCRIBIR, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ audio, mime: s.mime, ms: s.ms })
+        });
+        const ms = Date.now() - t0;
+        if (!res.ok) {
+          let detalle = '';
+          try { const j = await res.json(); detalle = (j && j.error) || ''; } catch (_) {}
+          if (res.status === 404) return anotar('el endpoint no existe (404): ¿está publicado http-functions.js v1.0.3?');
+          if (res.status === 504) return anotar(`corte de conexión (504) a los ${segundos(ms)}: el servidor tardó más de ~14 s`);
+          return anotar(`HTTP ${res.status}${detalle ? ' · ' + detalle : ''}`);
+        }
+        const data = await res.json();
+        if (!data || !data.ok) return anotar((data && data.error) || 'respuesta sin texto');
+        this._registrar('info', `Transcripción, segmento ${i + 1}: ${segundos(ms)} · modelo ${data.modelo || '?'} · facturado ${data.facturadoS || 0} s · ${textoPalabras(data.texto)}`);
+        return { texto: String(data.texto || '').trim(), facturadoS: Number(data.facturadoS) || 0, modelo: data.modelo || '' };
+      } catch (e) {
+        return anotar((e && e.message) || 'error de red');
+      }
+    }
+
+    _anadirGrabacion(origen, blob, ms) {
+      const url = URL.createObjectURL(blob);
+      this._urlsAudio.push(url);
+      const tipo = blob.type || 'audio/webm';
+      this._grabaciones.push({
+        origen,
+        formato: tipo,
+        ms,
+        bytes: blob.size,
+        kbps: ms > 0 ? Math.round((blob.size * 8) / ms) : 0,
+        url,
+        ext: extensionDe(tipo)
+      });
+      this._pintarGrabaciones();
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1219,9 +1563,14 @@
       if (!this._pruebasDictado.length) out.push('- Sin pruebas');
       this._pruebasDictado.forEach((d, i) => {
         out.push(`#${i + 1} ${textoModo(d.modo)}${d.grabarALaVez ? ' + grabación a la vez' : ''}`);
-        out.push(`  ${mmss(d.fin - d.inicio)} · ${textoPalabras(d.texto)} · ${d.texto.length} caracteres · terminó por ${this._textoCausa(d.causa)}`);
-        if (d.modo !== 'centri') out.push(`  cortes del motor: ${d.cortes} · tiempo sordo: ${segundos(d.sordoTotal)} · hueco mayor: ${segundos(d.sordoMax)} · silencios sin voz: ${d.sinVoz}`);
-        out.push(`  toques ignorados en el micrófono: ${d.toquesIgnorados || 0} · duplicados corregidos: ${d.duplicados || 0}`);
+        if (d.modo === 'transcribir') {
+          out.push(`  audio: ${mmss(d.msAudio)} · ${d.segmentos} ${d.segmentos === 1 ? 'segmento' : 'segmentos'} · enviado ${kb(d.bytes)} · ${d.formato || 'formato desconocido'}`);
+          out.push(`  texto en ${segundos(d.esperaMs)} desde Terminar · modelo ${d.modelo || '—'} · facturado ${d.facturadoS} s · ${textoPalabras(d.texto)} · ${d.texto.length} caracteres`);
+        } else {
+          out.push(`  ${mmss(d.fin - d.inicio)} · ${textoPalabras(d.texto)} · ${d.texto.length} caracteres · terminó por ${this._textoCausa(d.causa)}`);
+        }
+        if (d.modo === 'largo') out.push(`  cortes del motor: ${d.cortes} · tiempo sordo: ${segundos(d.sordoTotal)} · hueco mayor: ${segundos(d.sordoMax)} · silencios sin voz: ${d.sinVoz}`);
+        out.push(`  toques ignorados en el micrófono: ${d.toquesIgnorados || 0}`);
         if (d.errores.length) out.push(`  errores: ${d.errores.join(', ')}`);
         out.push(`  texto: «${d.texto}»`);
       });
@@ -1341,12 +1690,7 @@
         b.addEventListener('click', () => {
           if (this._dictado) return;
           this._modoDictado = b.dataset.modo;
-          this.shadowRoot.querySelectorAll('[data-modo]').forEach((x) => {
-            const on = x.dataset.modo === this._modoDictado;
-            x.classList.toggle('on', on);
-            x.setAttribute('aria-pressed', on ? 'true' : 'false');
-          });
-          $('modoAyuda').textContent = ayudaModo(this._modoDictado);
+          this._pintarModo();
           this._pintarEstadoDictado(PLACEHOLDER);
         });
       });
@@ -1486,6 +1830,7 @@
     font-size: 13.5px; color: var(--ink-soft); margin-bottom: 14px; cursor: pointer;
   }
   .check input { width: 18px; height: 18px; accent-color: var(--accent); }
+  .check.apagada { opacity: .45; cursor: default; }
 
   .mic-row { display: flex; align-items: center; gap: 14px; }
   .mic-btn {
@@ -1605,11 +1950,11 @@
       <p class="sub">Cuenta una visita de uno o dos minutos, con las pausas normales de quien piensa mientras habla.</p>
       <div class="seg" role="group" aria-label="Modo de dictado">
         <button type="button" data-modo="centri" aria-pressed="false">CENTRI hoy</button>
-        <button type="button" data-modo="largo" aria-pressed="false">Largo por frases</button>
-        <button type="button" data-modo="continuo" class="on" aria-pressed="true">Largo continuo</button>
+        <button type="button" data-modo="largo" aria-pressed="false">Dictado por frases</button>
+        <button type="button" data-modo="transcribir" class="on" aria-pressed="true">Grabar y transcribir</button>
       </div>
       <div class="ayuda" id="modoAyuda">${this._escape(ayudaModo(this._modoDictado))}</div>
-      <label class="check"><input type="checkbox" id="chkALaVez"> Grabar audio a la vez (respaldo)</label>
+      <label class="check" id="filaALaVez"><input type="checkbox" id="chkALaVez"> Grabar audio a la vez (respaldo)</label>
       <div class="mic-row">
         <button type="button" class="mic-btn idle" id="micBtn" aria-label="Empezar o terminar el dictado">
           <svg class="ico-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v5"/></svg>
