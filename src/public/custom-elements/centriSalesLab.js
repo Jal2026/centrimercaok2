@@ -2,8 +2,27 @@
  * CENTRIMERCA — CENTRI SALES · Banco de pruebas (Wix Custom Element)
  * Archivo:  public/custom-elements/centriSalesLab.js
  * Tag name: centri-sales-lab
- * VERSION:  1.0.3
+ * VERSION:  1.0.4
  * FECHA:    21 Octubre 2026
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * CAMBIOS v1.0.3 → v1.0.4 — INFORME DE LA VISITA CON IA
+ * ───────────────────────────────────────────────────────────────────────────
+ *   1. Selector «Cliente de la visita» con tres clientes DE DEMOSTRACIÓN
+ *      (DEMO_CLIENTES, ficticios). Solo afecta a «Grabar y transcribir».
+ *   2. Tras transcribir, el texto se envía a /_functions/centriSalesLabInforme
+ *      (backend/centriSalesLab.web.js v1.1.0, Claude Haiku con taxonomía
+ *      cerrada) y la app pinta el informe: resumen, resultado, interés del
+ *      cliente, pedido, productos, objeciones, alertas, próxima acción con
+ *      fecha y responsable, y «Para confirmar» (dudas que la IA no resolvió).
+ *      Es una petición aparte de la transcripción: cada una queda por debajo
+ *      del corte de ~14 s de Wix.
+ *   3. Ubicación de la visita: se pide sola al empezar a grabar, en paralelo
+ *      (no bloquea), y se muestra en el informe con enlace al mapa.
+ *   4. El informe del banco incluye cliente, ubicación e informe con IA.
+ *   ETIQUETAS replica para pintar la taxonomía TAXONOMIA_VISITA del backend:
+ *   si se cambia allí, cambiarla aquí.
+ *   REQUIERE: backend/centriSalesLab.web.js v1.1.0 y http-functions.js v1.0.4.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * CAMBIOS v1.0.2 → v1.0.3
@@ -145,7 +164,7 @@
  *   Custom element → archivo public/custom-elements/centriSalesLab.js,
  *   tag name centri-sales-lab. No necesita page code.
  *   El modo «Grabar y transcribir» necesita además (v1.0.2):
- *     backend/centriSalesLab.web.js v1.0.0 y http-functions.js v1.0.3.
+ *     backend/centriSalesLab.web.js v1.1.0 y http-functions.js v1.0.4 (v1.0.4).
  *   ⚠️ Probarlo como custom element, NUNCA dentro de un HtmlComponent
  *      (iframe): el micrófono de CENTRI está probado así y un iframe puede
  *      no tener permiso de micrófono ni de ubicación.
@@ -160,7 +179,7 @@
     return;
   }
 
-  const VERSION = '1.0.3';
+  const VERSION = '1.0.4';
   const TAG = `[CENTRI SALES LAB v${VERSION}]`;
 
   // ── Micrófono, modo «Como CENTRI hoy» — mismos valores que centriConsole v1.0.4 ──
@@ -175,6 +194,34 @@
   // ── Grabar y transcribir (v1.0.2) ──
   // Ruta absoluta, como CENTRI: functionsBase vacío = '/_functions/...'.
   const ENDPOINT_TRANSCRIBIR = '/_functions/centriSalesLabTranscribir';
+  // v1.0.4: informe de la visita con IA (petición aparte de la transcripción)
+  const ENDPOINT_INFORME = '/_functions/centriSalesLabInforme';
+
+  // v1.0.4 — Clientes DE DEMOSTRACIÓN, ficticios, solo para el banco de
+  // pruebas. En Centri Sales el cliente sale del maestro de clientes.
+  const DEMO_CLIENTES = [
+    { id: 'demo1', nombre: 'Frutería La Huerta (demo)',     tipo: 'frutería',     zona: 'Carabanchel' },
+    { id: 'demo2', nombre: 'Supermercado El Sol (demo)',    tipo: 'supermercado', zona: 'Vallecas' },
+    { id: 'demo3', nombre: 'Distribuciones Norte (demo)',   tipo: 'distribuidor', zona: 'Alcobendas' }
+  ];
+
+  // Etiquetas para pintar la taxonomía de backend/centriSalesLab.web.js v1.1.0
+  // (TAXONOMIA_VISITA). Un valor sin etiqueta se pinta tal cual.
+  const ETIQUETAS = {
+    resultado: { pedido: 'Pedido', oferta: 'Oferta', seguimiento: 'Seguimiento', incidencia: 'Incidencia', sin_interes: 'Sin interés', no_atendido: 'No atendido', otro: 'Otro' },
+    interes: { alto: 'Alto', medio: 'Medio', bajo: 'Bajo', indeterminado: 'Sin determinar' },
+    objeciones: { precio: 'Precio', calidad: 'Calidad', mermas: 'Mermas', entrega: 'Entrega', servicio: 'Servicio', condiciones_pago: 'Condiciones de pago', competencia: 'Competencia', otra: 'Otra' },
+    alertas: { riesgo_impago: 'Riesgo de impago', queja: 'Queja', riesgo_perdida: 'Riesgo de pérdida', descuento_solicitado: 'Pide descuento', oportunidad: 'Oportunidad' },
+    responsable: { comercial: 'Comercial', direccion_comercial: 'Dirección comercial', cobros: 'Cobros', logistica: 'Logística', calidad: 'Calidad', otro: 'Otro' }
+  };
+  function etiqueta(campo, v) { return (ETIQUETAS[campo] && ETIQUETAS[campo][v]) || v || '—'; }
+
+  function fechaLarga(iso) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) return '';
+    const d = new Date(iso + 'T12:00:00');
+    try { return d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }); }
+    catch (_) { return iso; }
+  }
   // Google V1 síncrono: máximo 1 minuto por petición.
   // v1.0.3: 55 s → 25 s. Medido el 21-oct: un trozo de 55 s tardó 11,1 s en
   // transcribirse, a 3 s del corte de ~14 s de Wix (y el texto no se guarda en
@@ -402,6 +449,7 @@
       this._causaFin = '';
       this._largo = null;
       this._trans = null;                // grabación en curso del modo «Grabar y transcribir»
+      this._clienteId = DEMO_CLIENTES[0].id;   // v1.0.4
 
       this._grab = null;                 // grabación en curso
       this._grabaciones = [];            // grabaciones terminadas
@@ -663,10 +711,19 @@
         esperaMs: 0,
         facturadoS: 0,
         modelo: '',
+        // Informe con IA y ubicación (v1.0.4)
+        cliente: this._modoDictado === 'transcribir' ? this._clienteActual() : null,
+        ubicacion: null,
+        informe: null,
+        informeMs: 0,
+        informeModelo: '',
+        informeTokens: null,
+        informeError: '',
         errores: [],
         causa: ''
       };
       this._pintarTextoDictado('', '');
+      this._pintarInforme(null);
       this._bloquearOpcionesDictado(true);
       this._mostrarTerminar(true);
       this._arrancarTick();
@@ -689,9 +746,121 @@
       this._pintarModo();   // _bloquearOpcionesDictado(false) reactiva la casilla también en «Grabar y transcribir»
       this._pintarTextoDictado(d.texto, '');
       this._pintarEstadoDictado(d.texto ? 'Prueba guardada. Puedes repetirla o cambiar de modo.' : (d.errores.length ? 'La prueba terminó con errores: mira el registro.' : 'No se recogió texto.'));
+      if (d.modo === 'transcribir') this._pintarInforme(d);
       this._pintarMetricasDictado();
       this._pintarPruebasDictado();
       this._pararTickSiInactivo();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // CLIENTE, UBICACIÓN E INFORME CON IA (v1.0.4)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    _clienteActual() {
+      return DEMO_CLIENTES.find((c) => c.id === this._clienteId) || DEMO_CLIENTES[0];
+    }
+
+    /** Pide la ubicación una vez, sin bloquear la grabación. */
+    _ubicarVisita(d) {
+      if (!navigator.geolocation) { d.ubicacion = { ok: false, error: 'ubicación no disponible en este navegador' }; return; }
+      const t0 = Date.now();
+      navigator.geolocation.getCurrentPosition((pos) => {
+        const c = pos.coords;
+        d.ubicacion = { ok: true, lat: c.latitude, lon: c.longitude, precision: Math.round(c.accuracy), ms: Date.now() - t0 };
+        this._registrar('info', `Ubicación de la visita: ±${d.ubicacion.precision} m en ${segundos(d.ubicacion.ms)}`);
+        if (d.fin) this._pintarInforme(d);
+      }, (err) => {
+        d.ubicacion = { ok: false, error: ERRORES_GEO[err && err.code] || (err && err.message) || 'error', ms: Date.now() - t0 };
+        this._registrar('warn', `Ubicación de la visita: ${d.ubicacion.error}`);
+        if (d.fin) this._pintarInforme(d);
+      }, { enableHighAccuracy: true, timeout: GEO_TIMEOUT_MS, maximumAge: 60000 });
+    }
+
+    async _pedirInforme(d) {
+      this._pintarEstadoDictado('Preparando el informe de la visita…');
+      const t0 = Date.now();
+      try {
+        // Mismo patrón que _fetchTts de centriConsole.js v1.0.4
+        const res = await fetch(ENDPOINT_INFORME, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            texto: d.texto,
+            cliente: d.cliente ? { nombre: d.cliente.nombre, tipo: d.cliente.tipo, zona: d.cliente.zona } : null
+          })
+        });
+        d.informeMs = Date.now() - t0;
+        if (!res.ok) {
+          let detalle = '';
+          try { const j = await res.json(); detalle = (j && j.error) || ''; } catch (_) {}
+          if (res.status === 404) d.informeError = 'el endpoint no existe (404): ¿está publicado http-functions.js v1.0.4?';
+          else if (res.status === 504) d.informeError = `corte de conexión (504) a los ${segundos(d.informeMs)}`;
+          else d.informeError = `HTTP ${res.status}${detalle ? ' · ' + detalle : ''}`;
+        } else {
+          const data = await res.json();
+          if (!data || !data.ok || !data.informe) d.informeError = (data && data.error) || 'respuesta sin informe';
+          else {
+            d.informe = data.informe;
+            d.informeModelo = data.modelo || '';
+            d.informeTokens = data.tokens || null;
+          }
+        }
+      } catch (e) {
+        d.informeMs = Date.now() - t0;
+        d.informeError = (e && e.message) || 'error de red';
+      }
+      if (d.informeError) {
+        d.errores.push(`informe: ${d.informeError}`);
+        this._registrar('error', `Informe de la visita: ${d.informeError}`);
+      } else {
+        const tk = d.informeTokens;
+        this._registrar('info', `Informe de la visita: ${segundos(d.informeMs)} · ${d.informeModelo}${tk ? ` · ${tk.entrada} tokens de entrada, ${tk.salida} de salida` : ''}${d.informe.camposInvalidos && d.informe.camposInvalidos.length ? ` · campos descartados: ${d.informe.camposInvalidos.join(', ')}` : ''}`);
+      }
+    }
+
+    _pintarInforme(d) {
+      const box = this.shadowRoot.getElementById('informeIA');
+      if (!box) return;
+      if (!d || d.modo !== 'transcribir' || (!d.informe && !d.informeError)) { box.innerHTML = ''; return; }
+      const e = (s) => this._escape(s);
+      const fila = (k, v) => v ? `<div class="kv"><span class="k">${e(k)}</span><span class="v">${v}</span></div>` : '';
+      const chips = (campo, lista, clase) => (lista && lista.length)
+        ? `<div class="chips">${lista.map((v) => `<span class="chip ${clase || ''}">${e(etiqueta(campo, v))}</span>`).join('')}</div>` : '';
+      let ubic = '';
+      if (d.ubicacion && d.ubicacion.ok) {
+        ubic = `±${d.ubicacion.precision} m · <a href="https://www.google.com/maps?q=${d.ubicacion.lat},${d.ubicacion.lon}" target="_blank" rel="noopener">ver en el mapa</a>`;
+      } else if (d.ubicacion) {
+        ubic = `<span class="err-t">${e(d.ubicacion.error)}</span>`;
+      } else {
+        ubic = '<span class="muted">buscando…</span>';
+      }
+      const cab = `<div class="inf-h">Informe de la visita</div><div class="inf-cli">${e(d.cliente ? d.cliente.nombre : '')}</div>`;
+      if (!d.informe) {
+        box.innerHTML = `<div class="informe">${cab}<p class="err-t">No se pudo preparar el informe: ${e(d.informeError)}</p>${fila('Ubicación', ubic)}</div>`;
+        return;
+      }
+      const i = d.informe;
+      const pedido = i.pedido && i.pedido.hay
+        ? e(i.pedido.descripcion || 'Sí') + (i.pedido.importe_eur !== null && i.pedido.importe_eur !== undefined ? ` · ${e(Number(i.pedido.importe_eur).toLocaleString('es-ES'))}\u00a0€` : '')
+        : '';
+      const pa = i.proxima_accion || {};
+      const accion = pa.descripcion
+        ? e(pa.descripcion) + (pa.fecha ? ` · <strong>${e(fechaLarga(pa.fecha))}</strong>` : '') + (pa.responsable ? ` · ${e(etiqueta('responsable', pa.responsable))}` : '')
+        : '';
+      box.innerHTML = `<div class="informe">
+        ${cab}
+        ${i.resumen ? `<p class="inf-resumen">${e(i.resumen)}</p>` : ''}
+        ${fila('Resultado', e(etiqueta('resultado', i.resultado)))}
+        ${fila('Interés del cliente', e(etiqueta('interes', i.interes)))}
+        ${fila('Pedido', pedido)}
+        ${i.productos && i.productos.length ? `<div class="inf-k">Productos</div>${chips('productos', i.productos)}` : ''}
+        ${i.objeciones && i.objeciones.length ? `<div class="inf-k">Objeciones</div>${chips('objeciones', i.objeciones)}` : ''}
+        ${i.alertas && i.alertas.length ? `<div class="inf-k">Alertas</div>${chips('alertas', i.alertas, 'alerta')}` : ''}
+        ${accion ? `<div class="inf-k">Próxima acción</div><p class="inf-accion">${accion}</p>` : ''}
+        ${i.dudas && i.dudas.length ? `<div class="inf-k">Para confirmar</div><ul class="inf-dudas">${i.dudas.map((q) => `<li>${e(q)}</li>`).join('')}</ul>` : ''}
+        ${fila('Ubicación', ubic)}
+        <div class="inf-pie">Texto en ${e(segundos(d.esperaMs))} · informe en ${e(segundos(d.informeMs))}</div>
+      </div>`;
     }
 
     _textoCausa(c) {
@@ -705,7 +874,7 @@
     }
 
     _bloquearOpcionesDictado(b) {
-      this.shadowRoot.querySelectorAll('[data-modo], #chkALaVez').forEach((el) => {
+      this.shadowRoot.querySelectorAll('[data-modo], #chkALaVez, #selCliente').forEach((el) => {
         // Los modos de dictado siguen apagados si el navegador no tiene dictado
         el.disabled = b || el.dataset.sinDictado === '1';
       });
@@ -1170,6 +1339,7 @@
       try { T.mime = MIME_CANDIDATOS.find((t) => MediaRecorder.isTypeSupported(t)) || ''; } catch (_) { T.mime = ''; }
       T.inicio = Date.now();
       if (!this._transSegmento(T)) return;
+      if (this._dictado) this._ubicarVisita(this._dictado);   // v1.0.4: en paralelo, no bloquea
       this._setMicState('listening');
       this._pintarEstadoDictado('Grabando. Habla con normalidad, con tus pausas. Pulsa Terminar al acabar.');
       if (navigator.vibrate) { try { navigator.vibrate(50); } catch (_) {} }
@@ -1286,6 +1456,12 @@
         d.modelo = (res.find((r) => r.modelo) || {}).modelo || '';
       }
       const texto = res.map((r) => r.texto).filter(Boolean).join(' ');
+      // v1.0.4: con texto, se pide el informe en una petición aparte
+      if (texto && d) {
+        d.texto = texto;
+        this._pintarTextoDictado(texto, '');
+        await this._pedirInforme(d);
+      }
       this._trans = null;
       this._cerrarPruebaDictado(texto, texto ? 'usuario' : 'error');
     }
@@ -1590,6 +1766,26 @@
         out.push(`  toques ignorados en el micrófono: ${d.toquesIgnorados || 0}`);
         if (d.errores.length) out.push(`  errores: ${d.errores.join(', ')}`);
         out.push(`  texto: «${d.texto}»`);
+        // v1.0.4 — cliente, ubicación e informe con IA
+        if (d.modo === 'transcribir') {
+          if (d.cliente) out.push(`  cliente: ${d.cliente.nombre}`);
+          if (d.ubicacion) out.push(`  ubicación: ${d.ubicacion.ok ? `±${d.ubicacion.precision} m en ${segundos(d.ubicacion.ms)}` : d.ubicacion.error}`);
+          if (d.informe) {
+            const inf = d.informe;
+            const pa = inf.proxima_accion || {};
+            const tk = d.informeTokens;
+            out.push(`  INFORME IA (${segundos(d.informeMs)} · ${d.informeModelo}${tk ? ` · ${tk.entrada}/${tk.salida} tokens` : ''})`);
+            out.push(`    resumen: ${inf.resumen || '—'}`);
+            out.push(`    resultado: ${etiqueta('resultado', inf.resultado)} · interés: ${etiqueta('interes', inf.interes)}`);
+            out.push(`    pedido: ${inf.pedido && inf.pedido.hay ? (inf.pedido.descripcion || 'sí') + (inf.pedido.importe_eur !== null ? ` · ${inf.pedido.importe_eur} €` : '') : 'no'}`);
+            out.push(`    productos: ${(inf.productos || []).join(', ') || '—'}`);
+            out.push(`    objeciones: ${(inf.objeciones || []).map((v) => etiqueta('objeciones', v)).join(', ') || '—'}`);
+            out.push(`    alertas: ${(inf.alertas || []).map((v) => etiqueta('alertas', v)).join(', ') || '—'}`);
+            out.push(`    próxima acción: ${pa.descripcion || '—'}${pa.fecha ? ` · ${pa.fecha}` : ''}${pa.responsable ? ` · ${etiqueta('responsable', pa.responsable)}` : ''}`);
+            out.push(`    para confirmar: ${(inf.dudas || []).join(' | ') || '—'}`);
+            if (inf.camposInvalidos && inf.camposInvalidos.length) out.push(`    campos descartados por la validación: ${inf.camposInvalidos.join(', ')}`);
+          }
+        }
       });
 
       out.push('');
@@ -1715,6 +1911,13 @@
       });
 
       $('btnTerminar').addEventListener('click', () => this._onTerminarClick());
+
+      // v1.0.4 — cliente de la visita
+      $('selCliente').addEventListener('change', (ev) => {
+        if (this._dictado) return;
+        this._clienteId = ev.target.value;
+        this._registrar('info', `Cliente de la visita: ${this._clienteActual().nombre}`);
+      });
 
       $('chkALaVez').addEventListener('change', (ev) => { this._grabarALaVez = !!ev.target.checked; });
 
@@ -1922,6 +2125,30 @@
   .btn.copiar-dictado { width: 100%; margin-top: 12px; }
   .btn:focus-visible, .mic-btn:focus-visible, .seg button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
+  /* v1.0.4 — selector de cliente e informe con IA */
+  .campo { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); margin-bottom: 6px; }
+  .select {
+    width: 100%; font-family: var(--font-body); font-size: 15px; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 14px;
+  }
+  .select:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .informe {
+    margin-top: 14px; border: 1px solid var(--accent); border-radius: var(--radius);
+    padding: 14px; background: var(--surface);
+  }
+  .inf-h { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+  .inf-cli { font-size: 16px; font-weight: 700; margin: 2px 0 8px; }
+  .inf-resumen { font-size: 14.5px; line-height: 1.55; margin: 0 0 10px; }
+  .inf-k { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 12px 0 6px; }
+  .inf-accion { font-size: 14px; line-height: 1.5; margin: 0; }
+  .inf-dudas { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.5; }
+  .inf-pie { font-size: 11.5px; color: var(--muted); margin-top: 12px; }
+  .informe a { color: var(--accent); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-size: 12.5px; font-weight: 600; background: var(--accent-soft); color: var(--accent-2); border-radius: 999px; padding: 4px 10px; }
+  .chip.alerta { background: rgba(176,58,46,.1); color: var(--err); }
+
   .prueba { border-top: 1px solid var(--hairline); padding: 10px 0; }
   .prueba:first-child { border-top: none; }
   .prueba-h { font-size: 13.5px; font-weight: 600; }
@@ -1969,6 +2196,10 @@
     <section class="card">
       <h2><span class="num">1</span>Dictado del reporte</h2>
       <p class="sub">Cuenta una visita de uno o dos minutos, con las pausas normales de quien piensa mientras habla.</p>
+      <label class="campo" for="selCliente">Cliente de la visita (para «Grabar y transcribir»)</label>
+      <select class="select" id="selCliente">
+        ${DEMO_CLIENTES.map((c) => `<option value="${this._escape(c.id)}"${c.id === this._clienteId ? ' selected' : ''}>${this._escape(c.nombre)} · ${this._escape(c.zona)}</option>`).join('')}
+      </select>
       <div class="seg" role="group" aria-label="Modo de dictado">
         <button type="button" data-modo="centri" aria-pressed="false">CENTRI hoy</button>
         <button type="button" data-modo="largo" aria-pressed="false">Dictado por frases</button>
@@ -1985,6 +2216,7 @@
       </div>
       <button type="button" class="btn terminar" id="btnTerminar" hidden>Terminar</button>
       <div class="texto" id="dictadoTexto"><span class="muted">El texto dictado aparecerá aquí.</span></div>
+      <div id="informeIA"></div>
       <div class="mets" id="dictadoMetricas"></div>
       <div id="dictadoPruebas"></div>
       <div id="copiarDictadoFila" hidden>
