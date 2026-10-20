@@ -1,8 +1,18 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI · Endpoints HTTP
  * Archivo:  backend/http-functions.js
- * VERSION:  1.0.2
- * FECHA:    14 Octubre 2026
+ * VERSION:  1.0.3
+ * FECHA:    21 Octubre 2026
+ *
+ * v1.0.3 — ADITIVO Y TEMPORAL: nuevo POST /_functions/centriSalesLabTranscribir
+ *   (banco de pruebas de Centri Sales, modo «Grabar y transcribir»). Añade el
+ *   import de transcribirPruebaCore y el bloque del endpoint al final. Nada
+ *   más cambia.
+ *   ⛔ ORDEN: backend/centriSalesLab.web.js PRIMERO, este archivo DESPUÉS.
+ *   Si el import no resuelve, caen TODOS los endpoints de este archivo
+ *   (CENTRI incluido).
+ *   ⚠️ Endpoint público sin sesión: quitar el import y el bloque al terminar
+ *   la prueba (ver cabecera de centriSalesLab.web.js).
  *
  * v1.0.2 — ADITIVO: nuevo GET /_functions/fichaVcard?id=<_id> (vCard de la
  *   ficha de contacto del equipo). Añade `notFound` al import de
@@ -63,6 +73,8 @@ import { askCentriCore, crearSesionCore } from 'backend/centriLogic.web';
 import { centriSynthesizeCore } from 'backend/centriTTS.web';
 // v1.0.2 — Ficha de contacto. ⛔ centriFichaContacto.web.js debe estar desplegado ANTES.
 import { vcardFichaCore } from 'backend/centriFichaContacto.web';
+// v1.0.3 — Banco de pruebas de Centri Sales (TEMPORAL). ⛔ centriSalesLab.web.js debe estar desplegado ANTES.
+import { transcribirPruebaCore } from 'backend/centriSalesLab.web';
 
 // ⛔ NO DESCOMENTAR HASTA QUE backend/centriTTS.web.js ESTÉ DESPLEGADO.
 //
@@ -216,5 +228,42 @@ export async function get_fichaVcard(request) {
   } catch (err) {
     console.error(`${TAG} get_fichaVcard EXCEPTION:`, err);
     return serverError({ headers: TEXT_HEADERS, body: 'No se ha podido generar el contacto.' });
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * POST /_functions/centriSalesLabTranscribir          · v1.0.3 (TEMPORAL)
+ *
+ * Banco de pruebas de Centri Sales: transcribe un segmento de audio (≤ 1 min,
+ * base64) con Google Speech-to-Text. Lo llama el custom element
+ * centri-sales-lab v1.0.2 por fetch, igual que la consola llama a centriTts.
+ *
+ * Cuerpo: { audio: <base64 sin prefijo>, mime: <tipo de MediaRecorder>, ms }
+ * Respuesta: { ok, texto, modelo, facturadoS, timeMs } | { ok: false, error }
+ *
+ * ⚠️ Público y sin sesión: transcribirPruebaCore limita tamaño y duración.
+ * Quitar este bloque y su import al terminar la prueba.
+ * ─────────────────────────────────────────────────────────────────────────── */
+export async function post_centriSalesLabTranscribir(request) {
+  try {
+    const body = await request.body.json();
+    const { audio, mime, ms } = body || {};
+
+    if (!audio) {
+      return badRequest({
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ ok: false, error: 'audio requerido' })
+      });
+    }
+
+    const result = await transcribirPruebaCore({ audio, mime, ms });
+
+    return ok({ headers: JSON_HEADERS, body: JSON.stringify(result) });
+  } catch (err) {
+    console.error(`${TAG} post_centriSalesLabTranscribir EXCEPTION:`, err);
+    return serverError({
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ ok: false, error: 'Error técnico transcribiendo el audio.' })
+    });
   }
 }
