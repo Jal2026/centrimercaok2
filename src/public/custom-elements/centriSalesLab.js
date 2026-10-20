@@ -2,8 +2,41 @@
  * CENTRIMERCA — CENTRI SALES · Banco de pruebas (Wix Custom Element)
  * Archivo:  public/custom-elements/centriSalesLab.js
  * Tag name: centri-sales-lab
- * VERSION:  1.0.0
+ * VERSION:  1.0.1
  * FECHA:    20 Octubre 2026
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * CAMBIOS v1.0.0 → v1.0.1 (primeras pruebas en Android)
+ * ───────────────────────────────────────────────────────────────────────────
+ *   1. BOTÓN TERMINAR APARTE. En v1.0.0 el mismo micrófono terminaba el
+ *      dictado largo. Durante cada relanzamiento el botón pasaba a verde y
+ *      parecía apagado: el comercial lo tocaba para «volver a encenderlo» y
+ *      eso era Terminar (dos pruebas acabaron así). Ahora, en los modos
+ *      largos, tocar el micrófono con la prueba abierta NO hace nada: se
+ *      cuenta como «toque ignorado» y solo para el botón Terminar.
+ *      El modo «Como CENTRI hoy» conserva su comportamiento literal (el
+ *      micrófono también para) y además muestra Terminar.
+ *   2. BOTÓN ESTABLE. En los modos largos el micrófono queda en rojo, con el
+ *      icono de micrófono y un pulso, desde que empieza a escuchar hasta
+ *      Terminar. Los cortes del motor ya no cambian el botón ni el texto de
+ *      estado: se ven en las métricas.
+ *   3. TERCER MODO «Largo continuo». En Android, «Largo por frases» (el de
+ *      v1.0.0) usa continuous = false como CENTRI: el motor se cierra en cada
+ *      pausa y Android pita al cerrar y al abrir. «Largo continuo» pide
+ *      continuous = true también en Android, para medir si corta menos y,
+ *      por tanto, pita menos. En iPhone y ordenador los dos modos largos son
+ *      iguales (allí ya era continuo).
+ *   4. UNIÓN DE RESULTADOS CON CONTROL DE DUPLICADOS (_unirFinales). Al
+ *      pedir continuo en Android no está comprobado cómo llegan los
+ *      resultados finales; si un final repite o contiene al anterior, no se
+ *      duplica el texto y se cuenta en «duplicados corregidos». Así la prueba
+ *      dice si ese caso existe.
+ *   5. MÉTRICAS EN VIVO. El contador de palabras de los modos largos solo
+ *      sumaba el texto ya consolidado (0 hasta el primer corte). Ahora cuenta
+ *      también la sesión abierta (L.enCurso).
+ *   6. Plurales en el informe y en la lista de pruebas («1 palabra»).
+ *   Pitidos: los emite el propio Android al abrir y cerrar el motor. La Web
+ *   Speech API no tiene ninguna opción para quitarlos.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * QUÉ ES
@@ -12,11 +45,12 @@
  * cada comercial lo que Centri Sales necesita del navegador, antes de
  * construir nada de backend:
  *
- *   1. DICTADO, en dos modos sobre la misma Web Speech API:
+ *   1. DICTADO, en tres modos sobre la misma Web Speech API (v1.0.1; ver
+ *      CAMBIOS para «Largo continuo»):
  *      · «Como CENTRI hoy»: COPIA LITERAL del micrófono de centriConsole.js
  *        v1.0.4 (portado de EGAEL +50). Envía tras SILENCE_MS de silencio y
  *        en Android trabaja frase a frase (continuous = false).
- *      · «Dictado largo»: NUEVO. No envía por silencio: acumula hasta que el
+ *      · «Largo por frases» (en v1.0.0, «Dictado largo»): NUEVO. No envía por silencio: acumula hasta que el
  *        comercial pulsa Terminar. Cuando el motor corta por su cuenta (en
  *        Android, a cada pausa), se relanza solo y se mide el tiempo sordo
  *        entre una sesión y la siguiente.
@@ -71,7 +105,7 @@
     return;
   }
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.0.1';
   const TAG = `[CENTRI SALES LAB v${VERSION}]`;
 
   // ── Micrófono, modo «Como CENTRI hoy» — mismos valores que centriConsole v1.0.4 ──
@@ -178,6 +212,11 @@
     return s ? s.split(/\s+/).length : 0;
   }
 
+  function textoPalabras(t) {
+    const n = contarPalabras(t);
+    return n + (n === 1 ? ' palabra' : ' palabras');
+  }
+
   function horaLog(d) {
     const p = (n, l) => String(n).padStart(l || 2, '0');
     return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) + '.' + p(d.getMilliseconds(), 3);
@@ -196,6 +235,55 @@
     if (IS_ANDROID) return 'Android';
     if (IS_IOS) return 'iPhone / iPad';
     return 'Otro (ordenador u otro sistema)';
+  }
+
+  const NOMBRE_MODO = {
+    centri:   'CENTRI hoy',
+    largo:    'Largo por frases',
+    continuo: 'Largo continuo'
+  };
+  function textoModo(m) { return NOMBRE_MODO[m] || m; }
+
+  function ayudaModo(m) {
+    if (m === 'centri') {
+      return `Igual que la consola de CENTRI: se corta tras ${SILENCIO_TXT} de silencio${IS_ANDROID ? ' y, en Android, en la primera pausa' : ''}.`;
+    }
+    const comun = ' Tocar el micrófono no lo para: usa Terminar.';
+    if (m === 'largo') {
+      return (IS_ANDROID
+        ? 'El de la primera versión: en Android el motor se cierra en cada pausa y se relanza solo (con su pitido). Acumula hasta Terminar.'
+        : 'No se corta con las pausas: acumula hasta Terminar. Si el motor corta, se relanza solo.') + comun;
+    }
+    return (IS_ANDROID
+      ? 'Pide al motor que no se cierre en las pausas. Si aun así corta, se relanza. Compara cortes y pitidos con «Largo por frases».'
+      : 'En este dispositivo es igual que «Largo por frases»: el motor ya trabaja en continuo.') + comun;
+  }
+
+  function normalizar(s) {
+    return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * Une los resultados finales de UNA sesión del motor.
+   * Caso normal: cada final es un trozo nuevo y se encadenan.
+   * Caso a vigilar (continuo en Android, no comprobado): un final que
+   * contiene al texto anterior (acumulativo) o que lo repite. No se duplica
+   * el texto y se cuenta en `duplicados`.
+   */
+  function unirFinales(results) {
+    let texto = '';
+    let duplicados = 0;
+    for (let i = 0; i < results.length; i++) {
+      if (!results[i].isFinal) continue;
+      const t = String(results[i][0].transcript || '').trim();
+      if (!t) continue;
+      if (!texto) { texto = t; continue; }
+      const a = normalizar(texto), b = normalizar(t);
+      if (b.indexOf(a) === 0) { texto = t; duplicados++; }        // acumulativo
+      else if (a.slice(-b.length) === b) { duplicados++; }         // repetido
+      else texto += ' ' + t;
+    }
+    return { texto, duplicados };
   }
 
   const ERRORES_DICTADO = {
@@ -239,7 +327,7 @@
       this._lastFinalTranscript = '';
 
       // Banco de pruebas
-      this._modoDictado = 'centri';      // 'centri' | 'largo'
+      this._modoDictado = 'continuo';    // 'centri' | 'largo' | 'continuo'
       this._grabarALaVez = false;
       this._dictado = null;              // prueba en curso
       this._pruebasDictado = [];         // pruebas terminadas
@@ -404,11 +492,30 @@
         this._empezarPruebaDictado();
         this._startMic();
       } else {
-        if (this._largo && this._largo.activo) { this._terminarLargo('usuario'); return; }
-        if (this._largo) return;   // aún cerrando la anterior
+        // v1.0.1: con la prueba abierta, el micrófono NO termina. Solo Terminar.
+        if (this._dictado || this._largo) {
+          if (this._dictado) this._dictado.toquesIgnorados++;
+          this._registrar('warn', 'Toque en el micrófono ignorado (para terminar, usa Terminar)');
+          return;
+        }
         this._empezarPruebaDictado();
         this._empezarLargo();
       }
+    }
+
+    _onTerminarClick() {
+      if (!this._dictado) return;
+      if (this._modoDictado === 'centri') {
+        this._causaFin = 'usuario';
+        this._stopMic();
+        return;
+      }
+      this._terminarLargo('usuario');
+    }
+
+    _mostrarTerminar(b) {
+      const t = this.shadowRoot.getElementById('btnTerminar');
+      if (t) t.hidden = !b;
     }
 
     _empezarPruebaDictado() {
@@ -426,13 +533,16 @@
         sordoTotal: 0,
         sordoMax: 0,
         sinVoz: 0,
+        duplicados: 0,
+        toquesIgnorados: 0,
         errores: [],
         causa: ''
       };
       this._pintarTextoDictado('', '');
       this._bloquearOpcionesDictado(true);
+      this._mostrarTerminar(true);
       this._arrancarTick();
-      this._registrar('info', `Dictado: empieza (modo ${this._modoDictado === 'centri' ? 'CENTRI hoy' : 'largo'}${this._grabarALaVez ? ', grabando a la vez' : ''})`);
+      this._registrar('info', `Dictado: empieza (modo ${textoModo(this._modoDictado)}${this._grabarALaVez ? ', grabando a la vez' : ''})`);
       if (this._grabarALaVez) this._grabarEmpezar('respaldo del dictado');
     }
 
@@ -445,8 +555,9 @@
       this._pruebasDictado.push(d);
       this._dictado = null;
       this._bloquearOpcionesDictado(false);
+      this._mostrarTerminar(false);
       if (this._grab && this._grab.origen === 'respaldo del dictado') this._grabarParar();
-      this._registrar('info', `Dictado: termina por ${this._textoCausa(d.causa)} · ${mmss(d.fin - d.inicio)} · ${contarPalabras(d.texto)} palabras`);
+      this._registrar('info', `Dictado: termina por ${this._textoCausa(d.causa)} · ${mmss(d.fin - d.inicio)} · ${textoPalabras(d.texto)}`);
       this._pintarTextoDictado(d.texto, '');
       this._pintarEstadoDictado(d.texto ? 'Prueba guardada. Puedes repetirla o cambiar de modo.' : 'No se recogió texto.');
       this._pintarMetricasDictado();
@@ -479,14 +590,16 @@
       box.innerHTML =
         m(mmss(fin - d.inicio), 'duración') +
         m(contarPalabras(texto), 'palabras') +
-        m(d.modo === 'largo' ? d.cortes : '—', 'cortes del motor') +
-        m(d.modo === 'largo' ? segundos(d.sordoTotal) : '—', 'tiempo sordo') +
-        m(d.modo === 'largo' ? segundos(d.sordoMax) : '—', 'hueco mayor') +
+        m(d.modo !== 'centri' ? d.cortes : '—', 'cortes del motor') +
+        m(d.modo !== 'centri' ? segundos(d.sordoTotal) : '—', 'tiempo sordo') +
+        m(d.modo !== 'centri' ? segundos(d.sordoMax) : '—', 'hueco mayor') +
         m(d.errores.length, 'errores');
     }
 
     _textoEnCurso() {
-      if (this._modoDictado === 'largo' && this._largo) return this._largo.texto;
+      if (this._modoDictado !== 'centri' && this._largo) {
+        return [this._largo.texto, this._largo.enCurso || ''].join(' ').trim();
+      }
       return this._androidFinalBuffer || this._lastFinalTranscript || '';
     }
 
@@ -497,8 +610,8 @@
       box.innerHTML = '<div class="sub-h">Pruebas de esta sesión</div>' +
         this._pruebasDictado.map((d, i) =>
           `<div class="prueba">
-             <div class="prueba-h">#${i + 1} · ${d.modo === 'centri' ? 'CENTRI hoy' : 'Dictado largo'}${d.grabarALaVez ? ' + grabación' : ''}</div>
-             <div class="prueba-d">${mmss(d.fin - d.inicio)} · ${contarPalabras(d.texto)} palabras · terminó por ${this._escape(this._textoCausa(d.causa))}${d.modo === 'largo' ? ` · ${d.cortes} cortes · ${segundos(d.sordoTotal)} sordo` : ''}${d.errores.length ? ` · errores: ${this._escape(d.errores.join(', '))}` : ''}</div>
+             <div class="prueba-h">#${i + 1} · ${this._escape(textoModo(d.modo))}${d.grabarALaVez ? ' + grabación' : ''}</div>
+             <div class="prueba-d">${mmss(d.fin - d.inicio)} · ${textoPalabras(d.texto)} · terminó por ${this._escape(this._textoCausa(d.causa))}${d.modo !== 'centri' ? ` · ${d.cortes} cortes · ${segundos(d.sordoTotal)} sordo` : ''}${d.toquesIgnorados ? ` · ${d.toquesIgnorados} ${d.toquesIgnorados === 1 ? 'toque ignorado' : 'toques ignorados'}` : ''}${d.duplicados ? ` · ${d.duplicados} ${d.duplicados === 1 ? 'duplicado corregido' : 'duplicados corregidos'}` : ''}${d.errores.length ? ` · errores: ${this._escape(d.errores.join(', '))}` : ''}</div>
            </div>`
         ).join('');
     }
@@ -688,10 +801,12 @@
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // DICTADO — modo «Dictado largo» (NUEVO)
+    // DICTADO — modos largos (NUEVO)
     //
-    // Mismos ajustes del motor que CENTRI por plataforma (Android: frase a
-    // frase y sin provisionales; resto: continuo con provisionales), pero:
+    // «Largo por frases»: mismos ajustes del motor que CENTRI por plataforma
+    // (Android: frase a frase y sin provisionales; resto: continuo con
+    // provisionales). «Largo continuo» (v1.0.1): continuo con provisionales
+    // en todas las plataformas. En los dos:
     //   · sin temporizador de silencio: solo termina con Terminar, un error
     //     fatal o el tope de MAX_DICTADO_MS;
     //   · cuando el motor corta por su cuenta, se consolida el texto de esa
@@ -703,11 +818,15 @@
     _empezarLargo() {
       this._largo = {
         activo: true,
+        continuo: this._modoDictado === 'continuo',
         texto: '',
         sesiones: 0,
         sordoDesde: 0,
         tope: setTimeout(() => this._terminarLargo('tope'), MAX_DICTADO_MS)
       };
+      // v1.0.1: icono de micrófono con pulso mientras dure la prueba (el botón no termina)
+      const b = this.shadowRoot.getElementById('micBtn');
+      if (b) b.classList.add('largo');
       this._largoSesion();
     }
 
@@ -724,11 +843,12 @@
       }
       this._recognition = rec;
       rec.lang = 'es-ES';
-      rec.interimResults = !IS_ANDROID;
-      rec.continuous = !IS_ANDROID;
+      rec.interimResults = L.continuo ? true : !IS_ANDROID;
+      rec.continuous = L.continuo ? true : !IS_ANDROID;
       rec.maxAlternatives = 1;
 
       let finalSesion = '';
+      let dupSesion = 0;
       let errorFatal = false;
 
       // Una sesión que arranca cuando la prueba ya se cerró (Terminar pulsado
@@ -754,19 +874,22 @@
             if (hueco > this._dictado.sordoMax) this._dictado.sordoMax = hueco;
           }
         }
-        this._setMicState('listening');
-        this._pintarEstadoDictado('Te escucho. Habla con pausas, como en el coche. Pulsa Terminar al acabar.');
-        if (L.sesiones === 1 && navigator.vibrate) { try { navigator.vibrate(50); } catch (_) {} }
+        if (L.sesiones === 1) {
+          this._setMicState('listening');
+          this._pintarEstadoDictado('Te escucho. Habla con pausas, como en el coche. Pulsa Terminar al acabar.');
+          if (navigator.vibrate) { try { navigator.vibrate(50); } catch (_) {} }
+        }
       };
       rec.onresult = (event) => {
         if (this._largo !== L) return;
-        let fin = '', provisional = '';
+        let provisional = '';
         for (let i = 0; i < event.results.length; i++) {
-          const t = event.results[i][0].transcript;
-          if (event.results[i].isFinal) fin += t;
-          else provisional += t;
+          if (!event.results[i].isFinal) provisional += event.results[i][0].transcript;
         }
-        finalSesion = fin.trim();
+        const u = unirFinales(event.results);
+        finalSesion = u.texto;
+        dupSesion = u.duplicados;
+        L.enCurso = finalSesion;   // para que las métricas cuenten la sesión abierta
         const base = L.texto + (L.texto && finalSesion ? ' ' : '') + finalSesion;
         this._pintarTextoDictado(base, provisional.trim());
       };
@@ -793,13 +916,19 @@
         if (this._largo !== L) return;
         this._isListening = false;
         if (finalSesion) L.texto += (L.texto ? ' ' : '') + finalSesion;
+        if (this._dictado && dupSesion) {
+          this._dictado.duplicados += dupSesion;
+          this._registrar('warn', `Dictado: ${dupSesion} resultado(s) repetido(s) del motor corregido(s)`);
+        }
         finalSesion = '';
+        dupSesion = 0;
+        L.enCurso = '';
         this._pintarTextoDictado(L.texto, '');
         if (L.activo && !errorFatal) {
           if (this._dictado) { this._dictado.cortes++; this._dictado.relanzamientos++; }
           L.sordoDesde = Date.now();
-          this._setMicState('preparing');
-          this._pintarEstadoDictado('El motor ha cortado. Relanzando…');
+          // v1.0.1: el botón y el estado NO cambian al relanzar (antes pasaba
+          // a verde y parecía apagado). Los cortes se ven en las métricas.
           setTimeout(() => { if (this._largo === L && L.activo) this._largoSesion(); }, RELANZAR_MS);
           return;
         }
@@ -838,6 +967,8 @@
       this._largo = null;
       this._isListening = false;
       this._setMicState('idle');
+      const b = this.shadowRoot.getElementById('micBtn');
+      if (b) b.classList.remove('largo');
       if (this._dictado && L.sordoDesde) {
         // El último hueco (corte sin relanzamiento) no cuenta como tiempo sordo.
         L.sordoDesde = 0;
@@ -1087,9 +1218,10 @@
       out.push('DICTADO');
       if (!this._pruebasDictado.length) out.push('- Sin pruebas');
       this._pruebasDictado.forEach((d, i) => {
-        out.push(`#${i + 1} ${d.modo === 'centri' ? 'CENTRI hoy' : 'Dictado largo'}${d.grabarALaVez ? ' + grabación a la vez' : ''}`);
-        out.push(`  ${mmss(d.fin - d.inicio)} · ${contarPalabras(d.texto)} palabras · ${d.texto.length} caracteres · terminó por ${this._textoCausa(d.causa)}`);
-        if (d.modo === 'largo') out.push(`  cortes del motor: ${d.cortes} · tiempo sordo: ${segundos(d.sordoTotal)} · hueco mayor: ${segundos(d.sordoMax)} · silencios sin voz: ${d.sinVoz}`);
+        out.push(`#${i + 1} ${textoModo(d.modo)}${d.grabarALaVez ? ' + grabación a la vez' : ''}`);
+        out.push(`  ${mmss(d.fin - d.inicio)} · ${textoPalabras(d.texto)} · ${d.texto.length} caracteres · terminó por ${this._textoCausa(d.causa)}`);
+        if (d.modo !== 'centri') out.push(`  cortes del motor: ${d.cortes} · tiempo sordo: ${segundos(d.sordoTotal)} · hueco mayor: ${segundos(d.sordoMax)} · silencios sin voz: ${d.sinVoz}`);
+        out.push(`  toques ignorados en el micrófono: ${d.toquesIgnorados || 0} · duplicados corregidos: ${d.duplicados || 0}`);
         if (d.errores.length) out.push(`  errores: ${d.errores.join(', ')}`);
         out.push(`  texto: «${d.texto}»`);
       });
@@ -1214,12 +1346,12 @@
             x.classList.toggle('on', on);
             x.setAttribute('aria-pressed', on ? 'true' : 'false');
           });
-          $('modoAyuda').textContent = this._modoDictado === 'centri'
-            ? `Igual que la consola de CENTRI: se corta tras ${SILENCIO_TXT} de silencio${IS_ANDROID ? ' y, en Android, en la primera pausa' : ''}.`
-            : 'No se corta con las pausas: acumula hasta que pulsas Terminar. Si el motor corta, se relanza solo. «Tiempo sordo» son los segundos en que no escuchaba entre un corte y el relanzamiento.';
+          $('modoAyuda').textContent = ayudaModo(this._modoDictado);
           this._pintarEstadoDictado(PLACEHOLDER);
         });
       });
+
+      $('btnTerminar').addEventListener('click', () => this._onTerminarClick());
 
       $('chkALaVez').addEventListener('change', (ev) => { this._grabarALaVez = !!ev.target.checked; });
 
@@ -1337,12 +1469,12 @@
   .ua { font-size: 11px; color: var(--muted); margin-top: 10px; overflow-wrap: anywhere; line-height: 1.4; }
 
   .seg {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px;
     background: var(--card); border-radius: 10px; padding: 4px;
   }
   .seg button {
-    font-family: var(--font-body); font-size: 13.5px; font-weight: 600;
-    border: none; border-radius: 8px; padding: 9px 8px;
+    font-family: var(--font-body); font-size: 13px; font-weight: 600; line-height: 1.25;
+    border: none; border-radius: 8px; padding: 9px 6px;
     background: transparent; color: var(--ink-soft); cursor: pointer;
   }
   .seg button.on { background: var(--surface); color: var(--accent); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
@@ -1373,7 +1505,25 @@
   .mic-btn.listening .ico-mic, .mic-btn.preparing .ico-mic { display: none; }
   .mic-btn .ico-stop { display: none; }
   .mic-btn.listening .ico-stop, .mic-btn.preparing .ico-stop { display: block; }
+  /* v1.0.1 — modos largos: el micrófono no termina, así que no lleva icono de
+     parar; queda en rojo con un pulso hasta Terminar. */
+  .mic-btn.largo.listening .ico-mic, .mic-btn.largo.preparing .ico-mic { display: block; }
+  .mic-btn.largo.listening .ico-stop, .mic-btn.largo.preparing .ico-stop { display: none; }
+  .mic-btn.largo.listening { animation: pulso 1.6s ease-in-out infinite; }
+  @keyframes pulso {
+    0%, 100% { box-shadow: 0 0 0 4px rgba(176,58,46,.18); }
+    50%      { box-shadow: 0 0 0 12px rgba(176,58,46,.06); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mic-btn.largo.listening { animation: none; }
+  }
   .estado { font-size: 13.5px; color: var(--ink-soft); line-height: 1.45; }
+  .btn.terminar {
+    width: 100%; margin-top: 14px;
+    background: transparent; color: var(--err); border-color: var(--err);
+  }
+  .btn.terminar:hover { background: rgba(176,58,46,.08); border-color: var(--err); }
+  .btn[hidden] { display: none; }
 
   .texto {
     margin-top: 14px; min-height: 110px; max-height: 260px; overflow-y: auto;
@@ -1454,10 +1604,11 @@
       <h2><span class="num">1</span>Dictado del reporte</h2>
       <p class="sub">Cuenta una visita de uno o dos minutos, con las pausas normales de quien piensa mientras habla.</p>
       <div class="seg" role="group" aria-label="Modo de dictado">
-        <button type="button" data-modo="centri" class="on" aria-pressed="true">Como CENTRI hoy</button>
-        <button type="button" data-modo="largo" aria-pressed="false">Dictado largo</button>
+        <button type="button" data-modo="centri" aria-pressed="false">CENTRI hoy</button>
+        <button type="button" data-modo="largo" aria-pressed="false">Largo por frases</button>
+        <button type="button" data-modo="continuo" class="on" aria-pressed="true">Largo continuo</button>
       </div>
-      <div class="ayuda" id="modoAyuda">Igual que la consola de CENTRI: se corta tras ${SILENCIO_TXT} de silencio${IS_ANDROID ? ' y, en Android, en la primera pausa' : ''}.</div>
+      <div class="ayuda" id="modoAyuda">${this._escape(ayudaModo(this._modoDictado))}</div>
       <label class="check"><input type="checkbox" id="chkALaVez"> Grabar audio a la vez (respaldo)</label>
       <div class="mic-row">
         <button type="button" class="mic-btn idle" id="micBtn" aria-label="Empezar o terminar el dictado">
@@ -1466,6 +1617,7 @@
         </button>
         <div class="estado" id="dictadoEstado">${PLACEHOLDER}</div>
       </div>
+      <button type="button" class="btn terminar" id="btnTerminar" hidden>Terminar</button>
       <div class="texto" id="dictadoTexto"><span class="muted">El texto dictado aparecerá aquí.</span></div>
       <div class="mets" id="dictadoMetricas"></div>
       <div id="dictadoPruebas"></div>
