@@ -2,8 +2,17 @@
  * CENTRIMERCA — CENTRI SALES · Banco de pruebas (Wix Custom Element)
  * Archivo:  public/custom-elements/centriSalesLab.js
  * Tag name: centri-sales-lab
- * VERSION:  1.0.2
+ * VERSION:  1.0.3
  * FECHA:    21 Octubre 2026
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * CAMBIOS v1.0.2 → v1.0.3
+ * ───────────────────────────────────────────────────────────────────────────
+ *   1. SEGMENTO_MS 55 s → 25 s. Primera prueba real con Google (21-oct):
+ *      el trozo de 55 s tardó 11,1 s, a 3 s del corte de ~14 s de Wix. Ver
+ *      la constante. El backend no cambia (admite hasta 60 s por trozo).
+ *   2. Botón «Copiar informe» también en el apartado 1, bajo las pruebas.
+ *      _copiarInforme(sufijo) avisa en el apartado desde el que se copia.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * CAMBIOS v1.0.1 → v1.0.2 — GRABAR Y TRANSCRIBIR EN SERVIDOR
@@ -151,7 +160,7 @@
     return;
   }
 
-  const VERSION = '1.0.2';
+  const VERSION = '1.0.3';
   const TAG = `[CENTRI SALES LAB v${VERSION}]`;
 
   // ── Micrófono, modo «Como CENTRI hoy» — mismos valores que centriConsole v1.0.4 ──
@@ -166,8 +175,13 @@
   // ── Grabar y transcribir (v1.0.2) ──
   // Ruta absoluta, como CENTRI: functionsBase vacío = '/_functions/...'.
   const ENDPOINT_TRANSCRIBIR = '/_functions/centriSalesLabTranscribir';
-  // Google V1 síncrono: máximo 1 minuto por petición. Margen de 5 s.
-  const SEGMENTO_MS = 55000;
+  // Google V1 síncrono: máximo 1 minuto por petición.
+  // v1.0.3: 55 s → 25 s. Medido el 21-oct: un trozo de 55 s tardó 11,1 s en
+  // transcribirse, a 3 s del corte de ~14 s de Wix (y el texto no se guarda en
+  // ningún sitio: si se corta, se pierde). La espera crece con la duración del
+  // trozo; como los trozos van en paralelo, más cortos = texto antes y lejos
+  // del corte.
+  const SEGMENTO_MS = 25000;
   // Opus a 32 kbps sobra para voz y deja ~220 KB por segmento (la prueba de
   // v1.0.0 grabó a 127 kbps sin fijarlo).
   const AUDIO_BPS = 32000;
@@ -736,6 +750,9 @@
     _pintarPruebasDictado() {
       const box = this.shadowRoot.getElementById('dictadoPruebas');
       if (!box) return;
+      // v1.0.3: «Copiar informe» también aquí, en cuanto hay una prueba
+      const fila = this.shadowRoot.getElementById('copiarDictadoFila');
+      if (fila) fila.hidden = !this._pruebasDictado.length;
       if (!this._pruebasDictado.length) { box.innerHTML = ''; return; }
       box.innerHTML = '<div class="sub-h">Pruebas de esta sesión</div>' +
         this._pruebasDictado.map((d, i) =>
@@ -1629,10 +1646,12 @@
       });
     }
 
-    _copiarInforme() {
+    // v1.0.3: `sufijo` elige dónde se avisa: '' (apartado 5) o 'Dictado' (apartado 1).
+    _copiarInforme(sufijo) {
+      const s = sufijo || '';
       const texto = this._textoInforme();
-      const aviso = this.shadowRoot.getElementById('copiarOk');
-      const manual = this.shadowRoot.getElementById('copiarManual');
+      const aviso = this.shadowRoot.getElementById('copiarOk' + s);
+      const manual = this.shadowRoot.getElementById('copiarManual' + s);
       this._copiarAlPortapapeles(texto).then((ok) => {
         if (ok) {
           manual.innerHTML = '';
@@ -1711,6 +1730,7 @@
       });
 
       $('btnCopiar').addEventListener('click', () => this._copiarInforme());
+      $('btnCopiarDictado').addEventListener('click', () => this._copiarInforme('Dictado'));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1899,6 +1919,7 @@
   .btn.small:hover { background: var(--accent-soft); }
   .btn.rec { background: var(--err); border-color: var(--err); }
   .btn-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .btn.copiar-dictado { width: 100%; margin-top: 12px; }
   .btn:focus-visible, .mic-btn:focus-visible, .seg button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
   .prueba { border-top: 1px solid var(--hairline); padding: 10px 0; }
@@ -1966,6 +1987,11 @@
       <div class="texto" id="dictadoTexto"><span class="muted">El texto dictado aparecerá aquí.</span></div>
       <div class="mets" id="dictadoMetricas"></div>
       <div id="dictadoPruebas"></div>
+      <div id="copiarDictadoFila" hidden>
+        <button type="button" class="btn ghost copiar-dictado" id="btnCopiarDictado">Copiar informe</button>
+        <div class="aviso" id="copiarOkDictado"></div>
+        <div id="copiarManualDictado"></div>
+      </div>
     </section>
 
     <section class="card">
