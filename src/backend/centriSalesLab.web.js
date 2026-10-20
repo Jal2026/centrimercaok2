@@ -1,8 +1,40 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * CENTRIMERCA — CENTRI SALES · Banco de pruebas · Transcripción (Wix Velo)
+ * CENTRIMERCA — CENTRI SALES · Banco de pruebas · Transcripción + informe (Wix Velo)
  * Archivo:  backend/centriSalesLab.web.js
- * VERSION:  1.0.0
+ * VERSION:  1.1.0
  * FECHA:    21 Octubre 2026
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * CAMBIOS v1.0.0 → v1.1.0 — INFORME DE LA VISITA CON IA (ADITIVO)
+ * ───────────────────────────────────────────────────────────────────────────
+ *   Nueva función pura informePruebaCore({ texto, cliente }): convierte la
+ *   transcripción del reporte en un informe estructurado con Claude Haiku y
+ *   una taxonomía CERRADA validada en código (patrón del intérprete de
+ *   CATHOVIA, cathoviaClima.js v1.3.0). La llama http-functions.js v1.0.4
+ *   (POST /_functions/centriSalesLabInforme) desde el custom element
+ *   centri-sales-lab v1.0.4, en una petición aparte de la transcripción:
+ *   cada una por debajo del corte de ~14 s de Wix.
+ *   transcribirPruebaCore NO cambia.
+ *
+ *   Procedencia:
+ *   · _llamarModelo(): COPIA LITERAL de cathoviaClima.js v1.3.0.
+ *   · Parseo (quitar ```json y JSON.parse) y _validar() contra TAXONOMIA:
+ *     mismo patrón que _interpretar/_validar de cathoviaClima.js.
+ *   · Modelo 'claude-haiku-4-5' y secret 'CENTRIMERCA': los de
+ *     centriLogic.web.js v1.0.9 (MODEL_FALLBACK y SECRET_API).
+ *   · Taxonomía, prompt y fecha de hoy: NUEVOS.
+ *
+ *   ⚠️ LÍNEA ROJA (Reglamento europeo de IA): el informe describe la VISITA y
+ *   al CLIENTE, nunca al comercial. El prompt prohíbe recoger lo que el
+ *   comercial dice de sí mismo (cansancio, ánimo, quejas personales). En
+ *   ningún caso se analiza la voz para inferir emociones (prohibido en el
+ *   trabajo, art. 5.1.f): aquí solo llega texto.
+ *
+ *   ⚠️ CODE/CMS: en el banco de pruebas la taxonomía y el prompt viven en
+ *   código para iterar rápido. En Centri Sales irán al Entrenador.
+ *
+ *   ⚠️ También es público y sin sesión, y ahora gasta tokens de Anthropic:
+ *   MAX_TEXTO y MAX_TOKENS_INFORME acotan cada llamada. Quitar al terminar.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * QUÉ ES
@@ -63,6 +95,8 @@
  *   · Secret GOOGLE_SA_JSON (el mismo del TTS de CENTRI).
  *   · En el proyecto de Google Cloud de esa Service Account: ACTIVAR
  *     «Cloud Speech-to-Text API». Sin eso Google responde 403.
+ *     (Hecho el 21-oct-2026 en el proyecto voice-egael.)
+ *   · v1.1.0: secret CENTRIMERCA (la clave de Anthropic de CENTRI, ya existe).
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -71,7 +105,7 @@ import { getSecret } from 'wix-secrets-backend';
 import crypto from 'crypto';
 
 // El TAG se deriva de VERSION (patrón de centriTTS.web.js).
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const V = `CENTRI_SALES_LAB v${VERSION}`;
 
 const STT_ENDPOINT   = 'https://speech.googleapis.com/v1/speech:recognize';
@@ -204,6 +238,215 @@ async function _recognize(accessToken, audio, encoding, modelo) {
 
   const data = await response.json();
   return { ok: true, status: response.status, timeMs, modelo, data };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INFORME DE LA VISITA (v1.1.0)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Mismo modelo y mismo secret que CENTRI (centriLogic.web.js v1.0.9).
+const MODELO_INFORME     = 'claude-haiku-4-5';
+const SECRET_ANTHROPIC   = 'CENTRIMERCA';
+const MAX_TOKENS_INFORME = 900;
+const MAX_TEXTO          = 8000;    // caracteres de transcripción (~10 min hablando)
+const ZONA               = 'Europe/Madrid';
+
+// ── Taxonomía CERRADA. Cambiarla aquí; el prompt y la validación la leen. ──
+const TAXONOMIA_VISITA = {
+  resultado:   ['pedido', 'oferta', 'seguimiento', 'incidencia', 'sin_interes', 'no_atendido', 'otro'],
+  interes:     ['alto', 'medio', 'bajo', 'indeterminado'],
+  objeciones:  ['precio', 'calidad', 'mermas', 'entrega', 'servicio', 'condiciones_pago', 'competencia', 'otra'],
+  alertas:     ['riesgo_impago', 'queja', 'riesgo_perdida', 'descuento_solicitado', 'oportunidad'],
+  responsable: ['comercial', 'direccion_comercial', 'cobros', 'logistica', 'calidad', 'otro']
+};
+const MULTIPLES = ['objeciones', 'alertas'];
+
+const DESCRIPCION_TAXONOMIA_VISITA = [
+  'resultado (uno): pedido (el cliente compra o confirma un pedido) | oferta (se le ha hecho o queda pendiente una oferta) | seguimiento (hay que volver o llamar, sin pedido ni oferta) | incidencia (la visita gira sobre un problema: mermas, entrega, calidad, factura) | sin_interes | no_atendido (no se pudo hablar con el cliente) | otro',
+  'interes (uno, del CLIENTE en seguir comprando o en comprar más): alto | medio | bajo | indeterminado',
+  'objeciones (lista, puede ir vacía): precio | calidad | mermas | entrega | servicio | condiciones_pago | competencia | otra',
+  'alertas (lista, puede ir vacía): riesgo_impago (debe facturas, retrasa pagos, hay que pasar a cobros) | queja | riesgo_perdida (puede irse a otro proveedor o dejar de comprar) | descuento_solicitado | oportunidad (más volumen, nuevas tiendas, campaña)',
+  'responsable de la próxima acción (uno): comercial | direccion_comercial | cobros | logistica | calidad | otro'
+].join('\n');
+
+function _hoyMadrid() {
+  const d = new Date();
+  try {
+    const dia = new Intl.DateTimeFormat('en-CA', { timeZone: ZONA, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+    const semana = new Intl.DateTimeFormat('es-ES', { timeZone: ZONA, weekday: 'long' }).format(d);
+    return { dia, semana };
+  } catch (e) {
+    return { dia: d.toISOString().slice(0, 10), semana: '' };
+  }
+}
+
+function _systemInforme(hoy) {
+  return [
+    'Eres el asistente que pasa a limpio los reportes de visita de los comerciales de Centrimerca, mayorista de frutas y hortalizas en Mercamadrid.',
+    'Recibes la transcripción automática de un reporte dictado por voz justo después de una visita a un cliente. Tu tarea: convertirla en un informe breve y estructurado.',
+    `Hoy es ${hoy.semana ? hoy.semana + ', ' : ''}${hoy.dia} (Europe/Madrid). Convierte las fechas relativas ("mañana", "el jueves", "la semana que viene") a AAAA-MM-DD. Si no hay fecha, null.`,
+    '',
+    'TAXONOMÍA CERRADA (usa solo estos valores, copiados exactamente):',
+    DESCRIPCION_TAXONOMIA_VISITA,
+    '',
+    'REGLAS:',
+    '- Solo lo que dice el reporte. No inventes importes, cantidades, fechas, productos ni acuerdos. Si algo no está, déjalo vacío o null.',
+    '- La transcripción viene de voz y puede tener errores. Corrige términos del sector solo cuando sea evidente por el contexto (p. ej. "rappers" → rappel, "palet" → palé). Nunca corrijas nombres de clientes ni de personas.',
+    '- Quita muletillas y repeticiones ("bueno", "pues", "o sea"). El resumen va en tercera persona, neutro, máximo 60 palabras.',
+    '- ⛔ El informe trata de la VISITA y del CLIENTE. NO recojas nada de lo que el comercial diga sobre sí mismo (cansancio, ánimo, frustración, opiniones personales sobre compañeros o jefes). No lo resumas, no lo uses para ningún campo.',
+    '- Lo que expresa el CLIENTE (quejas, enfado, satisfacción) sí cuenta para interes, objeciones y alertas.',
+    '- importe_eur: número solo si el reporte da una cifra en euros. Un porcentaje de descuento va en la descripción, no en importe_eur.',
+    '- productos: los que se nombran, en minúscula y singular genérico (p. ej. "tomate rama", "pera"). Máximo 10.',
+    '- dudas: hasta 3 preguntas cortas para que el comercial confirme lo que no queda claro o lo que pudo transcribirse mal. Si todo está claro, lista vacía.',
+    '- Si el reporte menciona un cliente distinto del de la visita, añádelo como duda.',
+    'Responde SOLO con JSON, sin texto alrededor ni bloques de código:',
+    '{"resumen":"","resultado":"","interes":"","pedido":{"hay":false,"descripcion":"","importe_eur":null},"productos":[],"objeciones":[],"alertas":[],"proxima_accion":{"descripcion":"","fecha":null,"responsable":""},"dudas":[]}'
+  ].join('\n');
+}
+
+function _texto(v, max) {
+  return String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function _validarInforme(r) {
+  const out = {};
+  const invalidos = [];
+  out.resumen = _texto(r.resumen, 600);
+
+  ['resultado', 'interes'].forEach((campo) => {
+    const v = String(r[campo] || '').trim();
+    out[campo] = TAXONOMIA_VISITA[campo].indexOf(v) >= 0 ? v : null;
+    if (out[campo] === null) invalidos.push(campo);
+  });
+
+  MULTIPLES.forEach((campo) => {
+    const lista = Array.isArray(r[campo]) ? r[campo] : [];
+    out[campo] = lista
+      .map((v) => String(v || '').trim())
+      .filter((v, i, a) => TAXONOMIA_VISITA[campo].indexOf(v) >= 0 && a.indexOf(v) === i);
+    if (lista.length !== out[campo].length) invalidos.push(campo);
+  });
+
+  const p = r.pedido && typeof r.pedido === 'object' ? r.pedido : {};
+  const imp = Number(p.importe_eur);
+  out.pedido = {
+    hay: p.hay === true,
+    descripcion: _texto(p.descripcion, 300),
+    importe_eur: (p.importe_eur !== null && p.importe_eur !== '' && isFinite(imp) && imp >= 0) ? imp : null
+  };
+
+  out.productos = (Array.isArray(r.productos) ? r.productos : [])
+    .map((v) => _texto(v, 40).toLowerCase())
+    .filter((v, i, a) => v && a.indexOf(v) === i)
+    .slice(0, 10);
+
+  const pa = r.proxima_accion && typeof r.proxima_accion === 'object' ? r.proxima_accion : {};
+  const fecha = String(pa.fecha || '').trim();
+  const resp = String(pa.responsable || '').trim();
+  out.proxima_accion = {
+    descripcion: _texto(pa.descripcion, 300),
+    fecha: /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? fecha : null,
+    responsable: TAXONOMIA_VISITA.responsable.indexOf(resp) >= 0 ? resp : null
+  };
+  if (pa.fecha && !out.proxima_accion.fecha) invalidos.push('proxima_accion.fecha');
+  if (resp && TAXONOMIA_VISITA.responsable.indexOf(resp) < 0) invalidos.push('proxima_accion.responsable');
+
+  out.dudas = (Array.isArray(r.dudas) ? r.dudas : [])
+    .map((v) => _texto(v, 160))
+    .filter(Boolean)
+    .slice(0, 3);
+
+  out.camposInvalidos = invalidos;
+  return out;
+}
+
+/**
+ * Función PURA. La llama http-functions.js v1.0.4.
+ * @param {{ texto: string, cliente: { nombre?: string, tipo?: string, zona?: string } }} params
+ * @returns {{ ok: boolean, informe?: object, modelo?: string, timeMs?: number,
+ *             tokens?: { entrada: number, salida: number }, error?: string }}
+ */
+export async function informePruebaCore({ texto, cliente }) {
+  const t = String(texto || '').trim();
+  const c = cliente && typeof cliente === 'object' ? cliente : {};
+  console.log(`[${V}] informe IN chars=${t.length} cliente=${_texto(c.nombre, 80) || '?'}`);
+
+  try {
+    if (!t) return { ok: false, error: 'Falta el texto del reporte.' };
+    if (t.length > MAX_TEXTO) {
+      return { ok: false, error: `Reporte demasiado largo (${t.length} caracteres; máximo ${MAX_TEXTO}).` };
+    }
+
+    let apiKey;
+    try { apiKey = await getSecret(SECRET_ANTHROPIC); }
+    catch (e) { return { ok: false, error: `Configuración incompleta: falta el secret ${SECRET_ANTHROPIC}.` }; }
+
+    const hoy = _hoyMadrid();
+    const user = [
+      'CLIENTE DE LA VISITA:',
+      `- Nombre: ${_texto(c.nombre, 120) || 'sin indicar'}`,
+      c.tipo ? `- Tipo: ${_texto(c.tipo, 60)}` : null,
+      c.zona ? `- Zona: ${_texto(c.zona, 60)}` : null,
+      '',
+      'TRANSCRIPCIÓN DEL REPORTE:',
+      t
+    ].filter((l) => l !== null).join('\n');
+
+    const t0 = Date.now();
+    const res = await _llamarModelo(apiKey, MODELO_INFORME, _systemInforme(hoy), user, MAX_TOKENS_INFORME);
+    const timeMs = Date.now() - t0;
+
+    let r;
+    try {
+      r = JSON.parse(res.texto.replace(/```json|```/g, '').trim());
+    } catch (e) {
+      console.error(`[${V}] informe: respuesta no JSON: ${res.texto.slice(0, 200)}`);
+      return { ok: false, error: 'La IA no devolvió un informe válido.', timeMs };
+    }
+
+    const informe = _validarInforme(r);
+    console.log(`[${V}] informe OUT ${timeMs}ms modelo=${MODELO_INFORME} in=${res.entrada} out=${res.salida} invalidos=${informe.camposInvalidos.join(',') || '0'}`);
+
+    return {
+      ok: true,
+      informe,
+      modelo: MODELO_INFORME,
+      timeMs,
+      tokens: { entrada: res.entrada, salida: res.salida }
+    };
+
+  } catch (err) {
+    console.error(`[${V}] informe EXCEPTION:`, err.message || err);
+    return { ok: false, error: 'Error técnico: ' + (err.message || 'desconocido') };
+  }
+}
+
+// COPIA LITERAL de _llamarModelo() de cathoviaClima.js v1.3.0, con un único
+// añadido marcado [LAB]: devuelve también los tokens de entrada y salida.
+async function _llamarModelo(apiKey, modelo, system, user, maxTokens) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: modelo,
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: 'user', content: user }]
+    })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data && data.error ? data.error.message : `HTTP ${res.status}`);
+  // [LAB] en CATHOVIA devuelve solo el texto
+  const u = data.usage || {};
+  return {
+    texto: (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim(),
+    entrada: u.input_tokens || 0,
+    salida: u.output_tokens || 0
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
