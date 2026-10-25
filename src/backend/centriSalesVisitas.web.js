@@ -1,8 +1,20 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Visitas (Wix Velo)
  * Archivo:  backend/centriSalesVisitas.web.js
- * VERSION:  1.0.1
+ * VERSION:  1.1.0
  * FECHA:    25 Octubre 2026
+ *
+ * v1.1.0 — 25 OCT 2026 · REABRIR UNA VISITA ENVIADA (petición de Jal tras la
+ *   primera prueba): desde «Visitas de hoy» el comercial abre el informe ya
+ *   enviado, lo corrige y lo vuelve a enviar.
+ *     · NUEVO centriSalesLeerVisita({ id }): la visita entera (informe,
+ *       transcripción, horas y coordenadas), solo si es de quien llama.
+ *     · centriSalesGuardarVisita: con visitaId ya no se aplica el filtro
+ *       «mismo texto ⇒ reintento»; se actualiza esa visita (si solo cambió
+ *       el resultado o las respuestas de «Para confirmar», el texto es el
+ *       mismo y antes se descartaba el cambio). Sin visitaId, igual que antes.
+ *       Al actualizar, ubicación y segundos de audio que lleguen vacíos no
+ *       borran los ya guardados.
  *
  * v1.0.1 — 25 OCT 2026 · Único cambio: ROL_AUTORIZADO pasa de 'Centri Sales'
  *   a 'AppVentas' (nombre real del rol en el site).
@@ -26,6 +38,8 @@
  *       el guardado hecho), devuelve la visita existente y no duplica.
  *   · centriSalesVisitasHoy()
  *       Las visitas de HOY (Europe/Madrid) del comercial que llama.
+ *   · centriSalesLeerVisita({ id }) (v1.1.0)
+ *       Una visita entera del comercial que llama, para reabrir su informe.
  *
  * El informe llega del custom element (lo generó backend/centriSalesLab
  * .web.js v1.2.0 y el comercial pudo cambiar el resultado y responder
@@ -69,7 +83,7 @@ import { webMethod, Permissions } from 'wix-web-module';
 import wixData from 'wix-data';
 import { currentMember } from 'wix-members-backend';
 
-const VERSION = '1.0.1';
+const VERSION = '1.1.0';
 const TAG = `[CentriSalesVisitas][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -469,7 +483,9 @@ export const centriSalesGuardarVisita = webMethod(
       const recientes = await _visitasRecientes(acceso.comercial.id);
 
       // ¿Reintento de un envío que ya se guardó? Mismo cliente y mismo texto.
-      const yaEnviada = recientes.find(it =>
+      // v1.1.0: solo sin visitaId. Con visitaId se actualiza esa visita (es
+      // idempotente) y así se guardan los cambios de una visita reabierta.
+      const yaEnviada = !_txt(visitaId) && recientes.find(it =>
         _txt(it[F.contactId]) === cId &&
         _txt(it[F.estado]) === ESTADO_ENVIADA &&
         _txt(it[F.transcripcion]) === texto
@@ -493,6 +509,11 @@ export const centriSalesGuardarVisita = webMethod(
       let guardada;
       if (base) {
         const actual = await wixData.get(C_VISITAS, base._id, AUTH);
+        // v1.1.0: al reenviar una visita, un dato que ahora llega vacío no
+        // borra el que ya estaba guardado (ubicación y segundos de audio).
+        [F.reporteLat, F.reporteLon, F.segundosAudio].forEach(k => {
+          if (cambios[k] === null && actual[k] !== null && actual[k] !== undefined) delete cambios[k];
+        });
         guardada = await wixData.update(C_VISITAS, Object.assign({}, actual, cambios), AUTH);
         console.log(`${TAG} visita COMPLETADA ${guardada._id} · ${cNom} · ${limpio.resultado || '—'} · ${acceso.comercial.nombre}`);
       } else {
@@ -511,6 +532,50 @@ export const centriSalesGuardarVisita = webMethod(
     } catch (e) {
       console.error(`${TAG} ❌ centriSalesGuardarVisita:`, e);
       return { ok: false, version: VERSION, error: { code: 'ERROR_GUARDAR', message: 'No se pudo guardar la visita.' }, detalle: safeErr(e) };
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2b. LEER UNA VISITA (v1.1.0) — para reabrir el informe desde «Visitas de hoy»
+//   payload: { id }
+//   return : { ok, version, visita:{ id, contactId, cliente, estado, hora,
+//              llegada(ms|null), transcripcion, informe, segundosAudio,
+//              reporteLat, reporteLon } } | { ok:false, error }
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const centriSalesLeerVisita = webMethod(
+  Permissions.SiteMember,
+  async (payload) => {
+    const acceso = await _reconocerComercial();
+    if (!acceso.ok) return { ok: false, version: VERSION, error: { code: 'SIN_ACCESO', message: acceso.error } };
+
+    try {
+      const id = _txt(payload && payload.id);
+      if (!id) {
+        return { ok: false, version: VERSION, error: { code: 'DATOS_INCOMPLETOS', message: 'Falta la visita.' } };
+      }
+      const it = await wixData.get(C_VISITAS, id, AUTH);
+      if (!it || _txt(it[F.comercialId]) !== acceso.comercial.id) {
+        console.warn(`${TAG} leerVisita: ${id} no existe o es de otro comercial (${acceso.comercial.nombre})`);
+        return { ok: false, version: VERSION, error: { code: 'NO_ENCONTRADA', message: 'No se encontró la visita.' } };
+      }
+      const base = _paraApp(it);
+      const num = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
+      return {
+        ok: true,
+        version: VERSION,
+        visita: Object.assign(base, {
+          transcripcion: _txt(it[F.transcripcion]),
+          informe:       (it[F.informe] && typeof it[F.informe] === 'object') ? it[F.informe] : null,
+          segundosAudio: num(it[F.segundosAudio]),
+          reporteLat:    num(it[F.reporteLat]),
+          reporteLon:    num(it[F.reporteLon])
+        })
+      };
+    } catch (e) {
+      console.error(`${TAG} ❌ centriSalesLeerVisita:`, e);
+      return { ok: false, version: VERSION, error: { code: 'ERROR_LEER', message: 'No se pudo abrir la visita.' }, detalle: safeErr(e) };
     }
   }
 );
