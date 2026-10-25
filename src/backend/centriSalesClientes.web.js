@@ -1,8 +1,11 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Clientes (Wix Velo)
  * Archivo:  backend/centriSalesClientes.web.js
- * VERSION:  1.2.0
+ * VERSION:  1.2.1
  * FECHA:    25 Octubre 2026
+ *
+ * v1.2.1 — 25 OCT 2026 · Único cambio: ROL_AUTORIZADO pasa de 'Centri Sales'
+ *   a 'AppVentas' (nombre real del rol en el site).
  *
  * ───────────────────────────────────────────────────────────────────────────
  * CAMBIOS v1.1.0 → v1.2.0 — COORDENADAS DEL CLIENTE EN CAMPOS PERSONALIZADOS
@@ -150,7 +153,7 @@ import { currentMember } from 'wix-members-backend';
 import { elevate } from 'wix-auth';
 import { contacts } from 'wix-crm-backend';
 
-const VERSION = '1.2.0';
+const VERSION = '1.2.1';
 const TAG = `[CentriSalesClientes][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -158,7 +161,7 @@ const AUTH = { suppressAuth: true };
 // Rol de miembro exigido (nombre o _id del rol). ⚠️ El rol tiene que llamarse
 // EXACTAMENTE así en los roles de miembro del site. No dejarlo vacío: vacío =
 // basta con tener sesión, y en este site los clientes B2B también son miembros.
-const ROL_AUTORIZADO = 'Centri Sales';
+const ROL_AUTORIZADO = 'AppVentas';
 
 const C_EQUIPO = 'equipo';   // ID real (minúscula), el mismo que centriEquipo.web.js
 const LIMITE_EQUIPO = 1000;  // idéntico a LIMITE de centriEquipo.web.js
