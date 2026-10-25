@@ -1,8 +1,13 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Banco de pruebas · Transcripción + informe (Wix Velo)
  * Archivo:  backend/centriSalesLab.web.js
- * VERSION:  1.4.0
+ * VERSION:  1.4.1
  * FECHA:    25 Octubre 2026
+ *
+ * v1.4.1 — 25 OCT 2026 · Único cambio: el resumen escribía la fecha como
+ *   «el 2026-12-15». AAAA-MM-DD solo va en proxima_accion.fecha; en el
+ *   resumen y en las descripciones, la fecha con palabras («el 15 de
+ *   diciembre»).
  *
  * v1.4.0 — 25 OCT 2026 · TICKET DE GASTO (pantallas del prototipo: «Añadir
  *   ticket», «Ticket de gasto», «No se lee bien el ticket»). ADITIVO.
@@ -163,7 +168,7 @@ import crypto from 'crypto';
 import { mediaManager } from 'wix-media-backend';   // v1.4.0 — fotos de tickets
 
 // El TAG se deriva de VERSION (patrón de centriTTS.web.js).
-const VERSION = '1.4.0';
+const VERSION = '1.4.1';
 const V = `CENTRI_SALES_LAB v${VERSION}`;
 
 const STT_ENDPOINT   = 'https://speech.googleapis.com/v1/speech:recognize';
@@ -353,6 +358,8 @@ function _systemInforme(hoy) {
     'Eres el asistente que pasa a limpio los reportes de visita de los comerciales de Centrimerca, mayorista de frutas y hortalizas en Mercamadrid.',
     'Recibes la transcripción automática de un reporte dictado por voz justo después de una visita a un cliente. Tu tarea: convertirla en un informe breve y estructurado.',
     `Hoy es ${hoy.semana ? hoy.semana + ', ' : ''}${hoy.dia} (Europe/Madrid). Convierte las fechas relativas ("mañana", "el jueves", "la semana que viene") a AAAA-MM-DD. Si no hay fecha, null.`,
+    // v1.4.1
+    '- El formato AAAA-MM-DD es solo para el campo fecha. En el resumen y en las descripciones escribe la fecha con palabras («el 15 de diciembre», «el jueves 29»).',
     '',
     'TAXONOMÍA CERRADA (usa solo estos valores, copiados exactamente):',
     DESCRIPCION_TAXONOMIA_VISITA,
