@@ -2,8 +2,14 @@
  * CENTRIMERCA — CENTRI SALES · App de los comerciales (Wix Custom Element)
  * Archivo:  public/custom-elements/centriSales.js
  * Tag name: centri-sales
- * VERSION:  1.0.6 (BETA)
+ * VERSION:  1.0.8 (BETA)
  * FECHA:    25 Octubre 2026
+ *
+ * v1.0.8 — 25 OCT 2026 · (Parte de 1.0.6; la 1.0.7 «motivo» se descarta.)
+ *   Resultados de centriSalesLab 1.5.1: fuera «Oferta», entra «Ventas»;
+ *   nuevos Negociación, Administrativa, Presentación y Cortesía (solo en la
+ *   lista de «Cambiar»; sin botones nuevos). Al reabrir una visita antigua
+ *   con «oferta», se muestra «Ventas».
  *
  * v1.0.6 — 25 OCT 2026 · «Añadir a mi calendario»: con la fecha de la
  *   próxima acción fijada, un botón la lleva al calendario del móvil.
@@ -245,9 +251,13 @@
   // prototipo: gris, como Sin interés.
   const RESULTADOS = [
     { k: 'pedido',      label: 'Pedido',      icon: 'checkC', bg: C.verdeMed },
-    { k: 'oferta',      label: 'Oferta',      icon: 'tag',    bg: C.verdeOsc },
+    { k: 'ventas',      label: 'Ventas',      icon: 'tag',    bg: C.verdeOsc },   // v1.0.8
+    { k: 'negociacion', label: 'Negociación', icon: 'trend',  bg: C.verdeOsc },   // v1.0.8
     { k: 'seguimiento', label: 'Seguimiento', icon: 'cycle',  bg: C.verdeAz },
+    { k: 'administrativa', label: 'Administrativa', icon: 'receipt', bg: C.verdeNeg },   // v1.0.8
     { k: 'incidencia',  label: 'Incidencia',  icon: 'alert',  bg: C.fucsia },
+    { k: 'presentacion', label: 'Presentación', icon: 'user', bg: C.verdeAz },   // v1.0.8
+    { k: 'cortesia',    label: 'Cortesía',    icon: 'sparkles', bg: C.verdeMed },   // v1.0.8
     { k: 'sin_interes', label: 'Sin interés', icon: 'minus',  bg: C.gris },
     { k: 'no_atendido', label: 'No atendido', icon: 'user',   bg: C.gris },
     { k: 'otro',        label: 'Otro',        icon: 'help',   bg: C.gris }
@@ -654,6 +664,7 @@
       this._texto = v.transcripcion || '';
       this._textoPrevio = '';
       const inf = v.informe;
+      if (inf.resultado === 'oferta') inf.resultado = 'ventas';   // v1.0.8: valor antiguo
       if (!Array.isArray(inf.confirmaciones)) inf.confirmaciones = (inf.dudas || []).map((q) => ({ pregunta: q, respuesta: '' }));
       this._informe = inf;
       const coord = (typeof v.reporteLat === 'number' && typeof v.reporteLon === 'number') ? { lat: v.reporteLat, lon: v.reporteLon, precision: null } : null;
