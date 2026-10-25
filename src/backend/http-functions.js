@@ -1,8 +1,17 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI · Endpoints HTTP
  * Archivo:  backend/http-functions.js
- * VERSION:  1.0.4
- * FECHA:    21 Octubre 2026
+ * VERSION:  1.0.5
+ * FECHA:    25 Octubre 2026
+ *
+ * v1.0.5 — ADITIVO: nuevo POST /_functions/centriSalesTicket (foto del
+ *   ticket de gasto de la app de los comerciales: la IA lo lee y la foto se
+ *   guarda en el Media Manager). Añade ticketCore al import de
+ *   centriSalesLab.web y el bloque del endpoint al final. Nada más cambia.
+ *   ⛔ ORDEN: backend/centriSalesLab.web.js v1.4.0 PRIMERO, este archivo
+ *   DESPUÉS. Si ticketCore no existe aún, caen TODOS los endpoints.
+ *   ⚠️ Público y sin sesión, como los otros dos de la app: ticketCore limita
+ *   tamaño y formato.
  *
  * v1.0.4 — ADITIVO Y TEMPORAL: nuevo POST /_functions/centriSalesLabInforme
  *   (banco de pruebas de Centri Sales: informe de la visita con IA). Añade
@@ -82,7 +91,8 @@ import { centriSynthesizeCore } from 'backend/centriTTS.web';
 import { vcardFichaCore } from 'backend/centriFichaContacto.web';
 // v1.0.3 — Banco de pruebas de Centri Sales (TEMPORAL). ⛔ centriSalesLab.web.js debe estar desplegado ANTES.
 // v1.0.4 — + informePruebaCore. ⛔ centriSalesLab.web.js v1.1.0 debe estar desplegado ANTES.
-import { transcribirPruebaCore, informePruebaCore } from 'backend/centriSalesLab.web';
+// v1.0.5 — + ticketCore. ⛔ centriSalesLab.web.js v1.4.0 debe estar desplegado ANTES.
+import { transcribirPruebaCore, informePruebaCore, ticketCore } from 'backend/centriSalesLab.web';
 
 // ⛔ NO DESCOMENTAR HASTA QUE backend/centriTTS.web.js ESTÉ DESPLEGADO.
 //
@@ -310,6 +320,44 @@ export async function post_centriSalesLabInforme(request) {
     return serverError({
       headers: JSON_HEADERS,
       body: JSON.stringify({ ok: false, error: 'Error técnico preparando el informe.' })
+    });
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * POST /_functions/centriSalesTicket                   · v1.0.5
+ *
+ * App de los comerciales: lee la foto de un ticket de gasto (categoría,
+ * total, fecha y comercio) y, si se lee, guarda la foto en el Media Manager.
+ * Lo llama el custom element centri-sales v1.0.5 por fetch (la foto no cabe
+ * en un atributo).
+ *
+ * Cuerpo: { imagen: <base64 sin prefijo>, mime: 'image/jpeg' | 'image/png' | 'image/webp' }
+ * Respuesta: { ok, ticket:{ legible, categoria, total_eur, fecha, comercio, foto } }
+ *            | { ok: false, error, reintentable? }
+ *
+ * ⚠️ Público y sin sesión: ticketCore limita tamaño y formato.
+ * ─────────────────────────────────────────────────────────────────────────── */
+export async function post_centriSalesTicket(request) {
+  try {
+    const body = await request.body.json();
+    const { imagen, mime } = body || {};
+
+    if (!imagen) {
+      return badRequest({
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ ok: false, error: 'imagen requerida' })
+      });
+    }
+
+    const result = await ticketCore({ imagen, mime });
+
+    return ok({ headers: JSON_HEADERS, body: JSON.stringify(result) });
+  } catch (err) {
+    console.error(`${TAG} post_centriSalesTicket EXCEPTION:`, err);
+    return serverError({
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ ok: false, error: 'Error técnico leyendo el ticket.', reintentable: true })
     });
   }
 }
