@@ -1,8 +1,35 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Banco de pruebas · Transcripción + informe (Wix Velo)
  * Archivo:  backend/centriSalesLab.web.js
- * VERSION:  1.1.0
- * FECHA:    21 Octubre 2026
+ * VERSION:  1.2.0
+ * FECHA:    25 Octubre 2026
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * CAMBIOS v1.1.0 → v1.2.0 — INFORME SEGÚN LA UI v1 + REINTENTOS
+ * ───────────────────────────────────────────────────────────────────────────
+ *   1. PRÓXIMA ACCIÓN Y SUGERENCIA DE LA IA, SEPARADAS. En la prueba real
+ *      la IA se inventó la próxima acción. Ahora:
+ *      · proxima_accion: SOLO la que dice el comercial. Si no dice ninguna,
+ *        va vacía (y la validación vacía también fecha y responsable).
+ *      · sugerencia_ia { descripcion, responsable }: campo NUEVO, aparte,
+ *        sin fecha. Es lo que propone la IA y la app lo marca «Esto no lo
+ *        has dicho tú». Si repite la próxima acción, se descarta.
+ *      En la taxonomía (responsable sirve para las dos), el prompt y
+ *      _validarInforme.
+ *   2. RESUMEN de 60 a 35 palabras (en el móvil ocupaba 8 líneas).
+ *   3. PROMPT: vocabulario del sector (rappel, objetivos, merma, palé,
+ *      reposición), respetar negaciones y conservar condiciones y salvedades.
+ *      Corrige los dos fallos de la prueba real («no le hacemos reposiciones»
+ *      → «retrasos en reposiciones»; se perdió «aunque no han llegado a los
+ *      objetivos»). Los ejemplos del prompt son DISTINTOS de esa prueba, para
+ *      que repetirla siga sirviendo de comprobación.
+ *      La sugerencia trata del cliente o de la cuenta, nunca del comercial
+ *      (línea roja del Reglamento europeo de IA).
+ *   4. ADITIVO: las respuestas de error llevan reintentable: true cuando
+ *      repetir puede servir (Google 5xx o 429, «Error técnico», la IA no
+ *      devolvió JSON). Lo usa el botón «Reintentar» de centri-sales-lab
+ *      v1.0.5. Las respuestas correctas y la firma de las dos funciones NO
+ *      cambian: http-functions.js v1.0.4 sigue igual.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * CAMBIOS v1.0.0 → v1.1.0 — INFORME DE LA VISITA CON IA (ADITIVO)
@@ -105,7 +132,7 @@ import { getSecret } from 'wix-secrets-backend';
 import crypto from 'crypto';
 
 // El TAG se deriva de VERSION (patrón de centriTTS.web.js).
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const V = `CENTRI_SALES_LAB v${VERSION}`;
 
 const STT_ENDPOINT   = 'https://speech.googleapis.com/v1/speech:recognize';
@@ -178,7 +205,8 @@ export async function transcribirPruebaCore({ audio, mime, ms }) {
       if (r.status === 403) {
         return { ok: false, error: 'Google rechazó la petición (403). Activa «Cloud Speech-to-Text API» en el proyecto de Google Cloud de la cuenta de servicio (GOOGLE_SA_JSON); si ya está activa, el motivo exacto está en los logs del sitio.' };
       }
-      return { ok: false, error: `El servicio de transcripción respondió ${r.status}.` };
+      // v1.2.0: reintentable si el fallo es de Google (5xx) o por exceso de peticiones (429)
+      return { ok: false, error: `El servicio de transcripción respondió ${r.status}.`, reintentable: r.status >= 500 || r.status === 429 };
     }
 
     const data = r.data || {};
@@ -206,7 +234,7 @@ export async function transcribirPruebaCore({ audio, mime, ms }) {
 
   } catch (err) {
     console.error(`[${V}] transcribir EXCEPTION:`, err.message || err);
-    return { ok: false, error: 'Error técnico: ' + (err.message || 'desconocido') };
+    return { ok: false, error: 'Error técnico: ' + (err.message || 'desconocido'), reintentable: true };   // v1.2.0
   }
 }
 
@@ -266,7 +294,16 @@ const DESCRIPCION_TAXONOMIA_VISITA = [
   'interes (uno, del CLIENTE en seguir comprando o en comprar más): alto | medio | bajo | indeterminado',
   'objeciones (lista, puede ir vacía): precio | calidad | mermas | entrega | servicio | condiciones_pago | competencia | otra',
   'alertas (lista, puede ir vacía): riesgo_impago (debe facturas, retrasa pagos, hay que pasar a cobros) | queja | riesgo_perdida (puede irse a otro proveedor o dejar de comprar) | descuento_solicitado | oportunidad (más volumen, nuevas tiendas, campaña)',
-  'responsable de la próxima acción (uno): comercial | direccion_comercial | cobros | logistica | calidad | otro'
+  'responsable (uno, de la próxima acción y de la sugerencia de la IA): comercial | direccion_comercial | cobros | logistica | calidad | otro'
+].join('\n');
+
+// v1.2.0 — Vocabulario del sector. ⚠️ CODE/CMS: en Centri Sales irá al
+// Entrenador junto con la taxonomía y el prompt.
+const VOCABULARIO_SECTOR = [
+  '- rappel: descuento o bonificación por volumen de compra, ligado a unos objetivos.',
+  '- objetivos: volumen de compra pactado con el cliente para un periodo (p. ej., el año).',
+  '- merma: género que se pierde o se estropea.',
+  '- palé, reposición: términos del sector; escríbelos tal cual.'
 ].join('\n');
 
 function _hoyMadrid() {
@@ -289,18 +326,29 @@ function _systemInforme(hoy) {
     'TAXONOMÍA CERRADA (usa solo estos valores, copiados exactamente):',
     DESCRIPCION_TAXONOMIA_VISITA,
     '',
+    // v1.2.0
+    'VOCABULARIO DEL SECTOR (escríbelo tal cual: no lo cambies por sinónimos ni lo reinterpretes):',
+    VOCABULARIO_SECTOR,
+    '',
     'REGLAS:',
     '- Solo lo que dice el reporte. No inventes importes, cantidades, fechas, productos ni acuerdos. Si algo no está, déjalo vacío o null.',
     '- La transcripción viene de voz y puede tener errores. Corrige términos del sector solo cuando sea evidente por el contexto (p. ej. "rappers" → rappel, "palet" → palé). Nunca corrijas nombres de clientes ni de personas.',
-    '- Quita muletillas y repeticiones ("bueno", "pues", "o sea"). El resumen va en tercera persona, neutro, máximo 60 palabras.',
+    // v1.2.0: 60 → 35 palabras
+    '- Quita muletillas y repeticiones ("bueno", "pues", "o sea"). El resumen va en tercera persona, neutro, máximo 35 palabras. Prioriza hechos, peticiones y condiciones del cliente.',
+    // v1.2.0: fallos de la prueba real (negación mal leída y condición perdida)
+    '- Respeta el sentido exacto de cada hecho y mantén las negaciones: «no le servimos los sábados» significa que no se le sirve ese día; no lo conviertas en un retraso ni en una incidencia de entrega.',
+    '- Conserva las condiciones y salvedades que cambian el sentido («aunque», «solo si», «a cambio de», «sin haber llegado a»). P. ej., «acepta el precio solo si se le sirve antes de las 7» no es «acepta el precio». Van en el resumen o en la descripción que corresponda.',
     '- ⛔ El informe trata de la VISITA y del CLIENTE. NO recojas nada de lo que el comercial diga sobre sí mismo (cansancio, ánimo, frustración, opiniones personales sobre compañeros o jefes). No lo resumas, no lo uses para ningún campo.',
     '- Lo que expresa el CLIENTE (quejas, enfado, satisfacción) sí cuenta para interes, objeciones y alertas.',
     '- importe_eur: número solo si el reporte da una cifra en euros. Un porcentaje de descuento va en la descripción, no en importe_eur.',
     '- productos: los que se nombran, en minúscula y singular genérico (p. ej. "tomate rama", "pera"). Máximo 10.',
     '- dudas: hasta 3 preguntas cortas para que el comercial confirme lo que no queda claro o lo que pudo transcribirse mal. Si todo está claro, lista vacía.',
     '- Si el reporte menciona un cliente distinto del de la visita, añádelo como duda.',
+    // v1.2.0: próxima acción (lo que dice el comercial) y sugerencia de la IA, separadas
+    '- proxima_accion: SOLO la que el comercial dice expresamente (lo que va a hacer, lo acordado con el cliente o lo que pide a otro departamento). Si no dice ninguna: descripcion "", fecha null y responsable "". No la deduzcas ni la completes.',
+    '- sugerencia_ia: tu propuesta, aparte, de UNA acción concreta que se desprenda de los hechos del reporte (sobre todo si hay alertas o algo sin resolver). Máximo 20 palabras, sin fecha. Trata del cliente o de la cuenta, nunca de cómo lo ha hecho el comercial. No repitas proxima_accion y nunca pongas tu propuesta en proxima_accion. Si no aporta nada: descripcion "" y responsable "".',
     'Responde SOLO con JSON, sin texto alrededor ni bloques de código:',
-    '{"resumen":"","resultado":"","interes":"","pedido":{"hay":false,"descripcion":"","importe_eur":null},"productos":[],"objeciones":[],"alertas":[],"proxima_accion":{"descripcion":"","fecha":null,"responsable":""},"dudas":[]}'
+    '{"resumen":"","resultado":"","interes":"","pedido":{"hay":false,"descripcion":"","importe_eur":null},"productos":[],"objeciones":[],"alertas":[],"proxima_accion":{"descripcion":"","fecha":null,"responsable":""},"sugerencia_ia":{"descripcion":"","responsable":""},"dudas":[]}'
   ].join('\n');
 }
 
@@ -350,6 +398,27 @@ function _validarInforme(r) {
   };
   if (pa.fecha && !out.proxima_accion.fecha) invalidos.push('proxima_accion.fecha');
   if (resp && TAXONOMIA_VISITA.responsable.indexOf(resp) < 0) invalidos.push('proxima_accion.responsable');
+  // v1.2.0: sin descripción no hay próxima acción (una fecha o un responsable sueltos serían inventados)
+  if (!out.proxima_accion.descripcion) {
+    out.proxima_accion.fecha = null;
+    out.proxima_accion.responsable = null;
+  }
+
+  // v1.2.0 — sugerencia de la IA, aparte de lo que dijo el comercial (sin fecha)
+  const sg = r.sugerencia_ia && typeof r.sugerencia_ia === 'object' ? r.sugerencia_ia : {};
+  const respSg = String(sg.responsable || '').trim();
+  out.sugerencia_ia = {
+    descripcion: _texto(sg.descripcion, 200),
+    responsable: TAXONOMIA_VISITA.responsable.indexOf(respSg) >= 0 ? respSg : null
+  };
+  if (respSg && TAXONOMIA_VISITA.responsable.indexOf(respSg) < 0) invalidos.push('sugerencia_ia.responsable');
+  // Si repite la próxima acción del comercial, no es una sugerencia: se descarta.
+  if (out.sugerencia_ia.descripcion && out.proxima_accion.descripcion &&
+      out.sugerencia_ia.descripcion.toLowerCase() === out.proxima_accion.descripcion.toLowerCase()) {
+    out.sugerencia_ia.descripcion = '';
+    invalidos.push('sugerencia_ia.repetida');
+  }
+  if (!out.sugerencia_ia.descripcion) out.sugerencia_ia.responsable = null;
 
   out.dudas = (Array.isArray(r.dudas) ? r.dudas : [])
     .map((v) => _texto(v, 160))
@@ -401,7 +470,7 @@ export async function informePruebaCore({ texto, cliente }) {
       r = JSON.parse(res.texto.replace(/```json|```/g, '').trim());
     } catch (e) {
       console.error(`[${V}] informe: respuesta no JSON: ${res.texto.slice(0, 200)}`);
-      return { ok: false, error: 'La IA no devolvió un informe válido.', timeMs };
+      return { ok: false, error: 'La IA no devolvió un informe válido.', timeMs, reintentable: true };   // v1.2.0
     }
 
     const informe = _validarInforme(r);
@@ -417,7 +486,7 @@ export async function informePruebaCore({ texto, cliente }) {
 
   } catch (err) {
     console.error(`[${V}] informe EXCEPTION:`, err.message || err);
-    return { ok: false, error: 'Error técnico: ' + (err.message || 'desconocido') };
+    return { ok: false, error: 'Error técnico: ' + (err.message || 'desconocido'), reintentable: true };   // v1.2.0
   }
 }
 
