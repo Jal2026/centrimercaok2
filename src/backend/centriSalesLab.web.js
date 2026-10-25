@@ -1,8 +1,28 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Banco de pruebas · Transcripción + informe (Wix Velo)
  * Archivo:  backend/centriSalesLab.web.js
- * VERSION:  1.4.1
+ * VERSION:  1.5.1
  * FECHA:    25 Octubre 2026
+ *
+ * v1.5.1 — 25 OCT 2026 · (Parte de 1.4.3; la 1.5.0 «motivo» se descarta.)
+ *   Resultado: fuera «oferta» (Jal: no la quiere en ningún lado); su sitio
+ *   lo ocupa «ventas», genérico. Nuevos: negociacion, administrativa,
+ *   presentacion, cortesia (cumpleaños, felicitar…). Un «oferta» que llegue
+ *   se convierte en «ventas». Requiere centriSales.js 1.0.8 y
+ *   centriSalesVisitas 1.1.2.
+ *
+ * v1.4.3 — 25 OCT 2026 · Único cambio: lista de lo que NO es una oferta
+ *   (Jal: ningún dictado hablaba de una oferta pendiente). La IA lo dedujo
+ *   de «que les mantengamos al tanto de todas las ofertas», de una petición
+ *   de más descuento y de una petición de información de producto premium.
+ *
+ * v1.4.2 — 25 OCT 2026 · Único cambio: definición de «oferta» y
+ *   «seguimiento». Con «se le ha hecho o queda pendiente una oferta», la IA
+ *   ponía «oferta» en visitas de revisión de la relación con cita para
+ *   negociar las condiciones de 2027 (ninguna era una oferta; Jal). Ahora:
+ *   oferta = se presentó o se compromete una oferta CONCRETA para ese
+ *   cliente; revisar la relación, quedar para negociar condiciones más
+ *   adelante, enviar catálogo o newsletter = seguimiento.
  *
  * v1.4.1 — 25 OCT 2026 · Único cambio: el resumen escribía la fecha como
  *   «el 2026-12-15». AAAA-MM-DD solo va en proxima_accion.fecha; en el
@@ -168,7 +188,7 @@ import crypto from 'crypto';
 import { mediaManager } from 'wix-media-backend';   // v1.4.0 — fotos de tickets
 
 // El TAG se deriva de VERSION (patrón de centriTTS.web.js).
-const VERSION = '1.4.1';
+const VERSION = '1.5.1';
 const V = `CENTRI_SALES_LAB v${VERSION}`;
 
 const STT_ENDPOINT   = 'https://speech.googleapis.com/v1/speech:recognize';
@@ -317,7 +337,7 @@ const ZONA               = 'Europe/Madrid';
 
 // ── Taxonomía CERRADA. Cambiarla aquí; el prompt y la validación la leen. ──
 const TAXONOMIA_VISITA = {
-  resultado:   ['pedido', 'oferta', 'seguimiento', 'incidencia', 'sin_interes', 'no_atendido', 'otro'],
+  resultado:   ['pedido', 'ventas', 'negociacion', 'seguimiento', 'administrativa', 'incidencia', 'presentacion', 'cortesia', 'sin_interes', 'no_atendido', 'otro'],   // v1.5.1
   interes:     ['alto', 'medio', 'bajo', 'indeterminado'],
   objeciones:  ['precio', 'calidad', 'mermas', 'entrega', 'servicio', 'condiciones_pago', 'competencia', 'otra'],
   alertas:     ['riesgo_impago', 'queja', 'riesgo_perdida', 'descuento_solicitado', 'oportunidad'],
@@ -326,7 +346,10 @@ const TAXONOMIA_VISITA = {
 const MULTIPLES = ['objeciones', 'alertas'];
 
 const DESCRIPCION_TAXONOMIA_VISITA = [
-  'resultado (uno): pedido (el cliente compra o confirma un pedido) | oferta (se le ha hecho o queda pendiente una oferta) | seguimiento (hay que volver o llamar, sin pedido ni oferta) | incidencia (la visita gira sobre un problema: mermas, entrega, calidad, factura) | sin_interes | no_atendido (no se pudo hablar con el cliente) | otro',
+  // v1.5.1: sin «oferta»; según de qué fue la visita
+  'resultado (uno, según de qué fue la visita): pedido (el cliente compra o confirma un pedido) | ventas (se trabaja una venta sin pedido cerrado: productos, precios o una propuesta presentada o que el comercial va a enviar) | negociacion (en la visita se negocia un pedido grande, precios o condiciones) | seguimiento (revisar la relación, volver, llamar o quedar para negociar condiciones más adelante; enviar el catálogo o apuntarle al newsletter también es seguimiento) | administrativa (facturas, albaranes, cobros o papeles) | incidencia (la visita gira sobre un problema: mermas, entrega, calidad, reclamación) | presentacion (presentar Centrimerca a un cliente nuevo o a un nuevo gerente o responsable del cliente) | cortesia (visita social sin tema comercial: felicitar, un cumpleaños, una celebración, saludar) | sin_interes | no_atendido (no se pudo hablar con el cliente) | otro',
+  'Si dudas entre ventas y seguimiento, es seguimiento.',
+  'Que el cliente pida descuentos, información o catálogo, o que se quede en revisar las condiciones más adelante, es seguimiento.',
   'interes (uno, del CLIENTE en seguir comprando o en comprar más): alto | medio | bajo | indeterminado',
   'objeciones (lista, puede ir vacía): precio | calidad | mermas | entrega | servicio | condiciones_pago | competencia | otra',
   'alertas (lista, puede ir vacía): riesgo_impago (debe facturas, retrasa pagos, hay que pasar a cobros) | queja | riesgo_perdida (puede irse a otro proveedor o dejar de comprar) | descuento_solicitado | oportunidad (más volumen, nuevas tiendas, campaña)',
@@ -405,7 +428,8 @@ function _validarInforme(r) {
   out.resumen = _texto(r.resumen, 900);   // v1.3.0: 600 → 900
 
   ['resultado', 'interes'].forEach((campo) => {
-    const v = String(r[campo] || '').trim();
+    let v = String(r[campo] || '').trim();
+    if (campo === 'resultado' && v === 'oferta') v = 'ventas';   // v1.5.1: valor antiguo
     out[campo] = TAXONOMIA_VISITA[campo].indexOf(v) >= 0 ? v : null;
     if (out[campo] === null) invalidos.push(campo);
   });
