@@ -1,8 +1,36 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Clientes (Wix Velo)
  * Archivo:  backend/centriSalesClientes.web.js
- * VERSION:  1.3.1
+ * VERSION:  1.4.0
  * FECHA:    25 Octubre 2026
+ *
+ * v1.4.0 — 25 OCT 2026 · BÚSQUEDA NUEVA (prueba real: dijo «Reviejo», el
+ *   dictado escribió «re viejo» y salió «REFF»). La búsqueda por voz y por
+ *   escrito usa ahora _buscar() (bloque «BÚSQUEDA v1.4.0»):
+ *     · Cuenta sobre todo que lo DICHO esté en el cliente; las palabras de
+ *       más del cliente pesan poco (0,7 lo dicho · 0,2 el cliente · 0,1
+ *       todas las palabras, para desempatar).
+ *     · Une palabras partidas por el dictado («re viejo» → «reviejo») y
+ *       también las del cliente («gold gourmet» → «goldgourmet»).
+ *     · Clave fonética para errores del dictado: b/v, h muda, ll/y, z/c/s,
+ *       qu/k, g/j, letras dobles.
+ *     · Palabras genéricas (frutas, hermanos, S.L., C.B., de, la…) no
+ *       deciden; solo desempatan.
+ *     · Lo dicho como principio de una palabra cuenta («frut» → «frutas»),
+ *       pero no al revés («victoriano» no es «victoria»).
+ *     · Puntuación y signos fuera («C.B.», «@/», «Nº»).
+ *     · Números dichos con letra pasan a cifra («Rosi once» → «rosi 11»).
+ *   Probado con los 2.167 clientes reales en 1.417 búsquedas simuladas
+ *   (exacto, palabra partida, errata, fonética, solo la palabra clave,
+ *   nombre fiscal): el cliente sale entre los 3 primeros en el 97,0 % (antes
+ *   93,1 %) y el primero en el 92,8 % (antes 83,8 %). Casi todos los fallos
+ *   que quedan son una sola palabra que comparten más de 3 clientes
+ *   («Martín»). «re viejo» → FRUTAS REVIEJO CB. Unos 15–40 ms por búsqueda.
+ *   El aviso de duplicados al dar de alta sigue con nameScore (sin cambios).
+ *
+ * v1.3.2 — 25 OCT 2026 · Único cambio: los mensajes de acceso que ve el usuario ya no
+ *   nombran «Centri Sales» («No tienes acceso a esta aplicación.», «No estás
+ *   dado de alta en el equipo.»).
  *
  * v1.3.1 — 25 OCT 2026 · Dirección completa otra vez. La 1.3.0 montaba
  *   «calle, ciudad» con addressLine + city, pero en la prueba real solo
@@ -178,7 +206,7 @@ import { currentMember } from 'wix-members-backend';
 import { elevate } from 'wix-auth';
 import { contacts } from 'wix-crm-backend';
 
-const VERSION = '1.3.1';
+const VERSION = '1.4.0';
 const TAG = `[CentriSalesClientes][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -305,7 +333,7 @@ async function _reconocerComercial() {
       const tiene = roles.some(r => r && (r._id === ROL_AUTORIZADO || r.title === ROL_AUTORIZADO));
       if (!tiene) {
         console.warn(`${TAG} acceso DENEGADO a Centri Sales: memberId=${memberId} sin el rol "${ROL_AUTORIZADO}"`);   // [SALES]
-        return { ok: false, error: 'No tienes acceso a Centri Sales.' };   // [SALES]
+        return { ok: false, error: 'No tienes acceso a esta aplicación.' };   // [SALES] v1.3.2
       }
     } catch (e) {
       console.error(`${TAG} no se pudieron leer los roles — se deniega el acceso:`, e.message);
@@ -332,7 +360,7 @@ async function _reconocerComercial() {
 
     if (coinciden.length === 0) {
       console.warn(`${TAG} acceso DENEGADO: email=${email} no está en ${C_EQUIPO} (${filas.length} fichas)`);
-      return { ok: false, error: 'No estás dado de alta en el equipo de Centri Sales.' };
+      return { ok: false, error: 'No estás dado de alta en el equipo.' };   // v1.3.2
     }
     if (coinciden.length > 1) {
       // Email compartido (p. ej. el genérico de la empresa): no identifica a nadie.
@@ -516,6 +544,171 @@ const FUZZY_MIN = 0.70;   // umbral de sugerencia
 
 // ── fin de la copia literal ──
 
+// ═══════════════════════════════════════════════════════════════════════════
+// BÚSQUEDA v1.4.0 — por voz o escrita (ver cabecera). Usa lev() de la copia
+// literal de arriba. Probada con los 2.167 clientes reales.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const GENERICAS_B = new Set([
+  'fruta', 'frutas', 'fruteria', 'fruterias', 'verdura', 'verduras', 'hortaliza', 'hortalizas',
+  'y', 'e', 'de', 'del', 'la', 'las', 'el', 'los',
+  'sl', 'slu', 'sll', 'sa', 'cb', 'sc', 'scoop', 'coop', 'ltda', 'lda',
+  'hnos', 'hno', 'hermanos', 'hermano'
+]);
+
+function _normB(s) {
+  return String(s || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+
+// Números dichos con letra → cifra («Rosi once» → «rosi 11»)
+const NUMEROS_B = {
+  cero: '0', uno: '1', una: '1', dos: '2', tres: '3', cuatro: '4', cinco: '5', seis: '6', siete: '7',
+  ocho: '8', nueve: '9', diez: '10', once: '11', doce: '12', trece: '13', catorce: '14', quince: '15',
+  dieciseis: '16', diecisiete: '17', dieciocho: '18', diecinueve: '19', veinte: '20', treinta: '30',
+  cuarenta: '40', cincuenta: '50', sesenta: '60', setenta: '70', ochenta: '80', noventa: '90', cien: '100'
+};
+
+function _tokensB(s) {
+  const t = _normB(s).split(' ').filter(Boolean);
+  // letras sueltas seguidas («s l», «c b») → una palabra («sl», «cb»)
+  const out = [];
+  for (let i = 0; i < t.length; i++) {
+    if (t[i].length === 1 && t[i + 1] && t[i + 1].length === 1) { out.push(t[i] + t[i + 1]); i++; }
+    else out.push(t[i]);
+  }
+  return out.map((x) => NUMEROS_B[x] || x);
+}
+
+// Clave fonética para errores típicos del dictado en español.
+function _fon(t) {
+  return t
+    .replace(/ch/g, '#')
+    .replace(/h/g, '')
+    .replace(/#/g, 'ch')
+    .replace(/[vw]/g, 'b')
+    .replace(/ll/g, 'y')
+    .replace(/z/g, 's')
+    .replace(/c([ei])/g, 's$1')
+    .replace(/qu([ei])/g, 'k$1')
+    .replace(/c(?!h)/g, 'k')
+    .replace(/g([ei])/g, 'j$1')
+    .replace(/x/g, 'ks')
+    .replace(/(.)\1+/g, '$1');
+}
+
+const _palabra = (w) => ({ w, f: _fon(w) });
+
+// Parecido entre una palabra DICHA (q) y una del cliente (c), 0..1.
+// El prefijo solo puntúa alto si lo dicho es el principio del nombre
+// («frut» → «frutas»), no al revés («victoriano» no es «victoria»).
+function _simB(q, c) {
+  if (q.w === c.w) return 1;
+  if (q.f === c.f) return 0.96;
+  const sa = q.f, sb = c.f;
+  const short = sa.length <= sb.length ? sa : sb;
+  const long = sa.length <= sb.length ? sb : sa;
+  if (sa.length >= 3 && sa.length < sb.length && sb.startsWith(sa)) return 0.80 + 0.15 * (sa.length / sb.length);
+  if (short.length * 2 < long.length) return short.length / long.length * 0.5;   // muy distintas de largo
+  const s = 1 - lev(sa, sb) / long.length;
+  return s < 0 ? 0 : s;
+}
+
+// x dicho contra palabras del cliente
+function _mejorB(x, lista) {
+  let b = 0;
+  for (const y of lista) { const s = _simB(x, y); if (s > b) { b = s; if (b === 1) break; } }
+  return b;
+}
+// palabra del cliente x contra lo dicho
+function _mejorInvB(x, dichas) {
+  let b = 0;
+  for (const y of dichas) { const s = _simB(y, x); if (s > b) { b = s; if (b === 1) break; } }
+  return b;
+}
+
+function _conParejas(ws) {
+  const out = ws.slice();
+  for (let i = 0; i + 1 < ws.length; i++) out.push(_palabra(ws[i].w + ws[i + 1].w));
+  return out;
+}
+
+function _distintivas(ws) {
+  const d = ws.filter((x) => !GENERICAS_B.has(x.w));
+  return d.length ? d : ws;
+}
+
+// Se calcula una vez por cliente (y se guarda con la lista en caché)
+function _prepararNombre(nombre) {
+  const all = _tokensB(nombre).map(_palabra);
+  if (!all.length) return null;
+  const dist = _distintivas(all);
+  return { all, dist, allExp: _conParejas(all), distExp: _conParejas(dist) };
+}
+
+function _prepararConsulta(texto) {
+  const all = _tokensB(texto).map(_palabra);
+  if (!all.length) return null;
+  const dist = _distintivas(all);
+  const pares = (ws) => { const p = []; for (let i = 0; i + 1 < ws.length; i++) p.push(_palabra(ws[i].w + ws[i + 1].w)); return p; };
+  return { all, dist, distPares: pares(dist), allPares: pares(all), distExp: _conParejas(dist) };
+}
+
+// Cobertura de lo DICHO: cada palabra dicha, sola o unida a la siguiente
+// («re viejo» → «reviejo»), busca su mejor pareja en el cliente.
+function _coberturaDicho(q, pares, cand) {
+  const n = q.length;
+  const dp = new Array(n + 1).fill(0);
+  for (let i = n - 1; i >= 0; i--) {
+    let v = _mejorB(q[i], cand) + dp[i + 1];
+    if (i + 1 < n) v = Math.max(v, 2 * _mejorB(pares[i], cand) + dp[i + 2]);
+    dp[i] = v;
+  }
+  return dp[0] / n;
+}
+
+function _coberturaCliente(c, qExp) {
+  let s = 0;
+  for (const t of c) s += _mejorInvB(t, qExp);
+  return s / c.length;
+}
+
+function _puntuarNombre(Q, C) {
+  if (!Q || !C) return 0;
+  const qc = _coberturaDicho(Q.dist, Q.distPares, C.distExp);
+  if (qc < 0.45) return qc * 0.6;   // poda: lo dicho no está en este cliente
+  const cc = _coberturaCliente(C.dist, Q.distExp);
+  const qcAll = _coberturaDicho(Q.all, Q.allPares, C.allExp);
+  return 0.7 * qc + 0.2 * cc + 0.1 * qcAll;
+}
+
+const MINIMO_BUSQUEDA = 0.62;
+
+/** Prepara una vez por carga (va con la lista en caché). */
+function _prepararBusqueda(lista) {
+  for (const c of lista) {
+    c._bn = c.negocio ? _prepararNombre(c.negocio) : null;
+    c._bf = c.nombreFiscal && c.nombreFiscal !== c.negocio ? _prepararNombre(c.nombreFiscal) : null;
+  }
+}
+
+/** Clientes que se parecen a lo dicho, de más a menos parecido. */
+function _buscar(texto, lista) {
+  const Q = _prepararConsulta(texto);
+  const out = [];
+  if (!Q) return out;
+  for (const c of lista) {
+    if (c._bn === undefined) _prepararBusqueda([c]);
+    const score = Math.max(_puntuarNombre(Q, c._bn), _puntuarNombre(Q, c._bf));
+    if (score >= MINIMO_BUSQUEDA) out.push({ c, score });
+  }
+  out.sort((a, b) => b.score - a.score);
+  return out;
+}
+
 function _tokens(s) {
   return normNombre(s).split(' ').filter(Boolean);
 }
@@ -595,6 +788,7 @@ async function _cargarClientes() {
   // Sin nombre comercial ni fiscal no hay nada que buscar ni que enseñar.
   const lista = todos.filter(c => c.contactId && (c.negocio || c.nombreFiscal));
 
+  _prepararBusqueda(lista);   // v1.4.0
   _cacheClientes = lista;
   _cacheClientesTs = ahora;
   console.log(`${TAG} clientes cargados: ${lista.length} (${todos.length} contactos con etiqueta) en ${Date.now() - ahora} ms`);
@@ -654,7 +848,7 @@ export const centriSalesBuscarCliente = webMethod(
       }
 
       const { lista, deCache } = await _cargarClientes();
-      const top = _puntuar(t, lista, FUZZY_MIN).slice(0, MAX_COINCIDENCIAS);
+      const top = _buscar(t, lista).slice(0, MAX_COINCIDENCIAS);   // v1.4.0
       const ms = Date.now() - t0;
 
       console.log(`${TAG} 🔎 "${t}" → ${top.length} de ${lista.length} · ${ms} ms${deCache ? ' (caché)' : ''}`);
