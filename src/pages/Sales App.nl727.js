@@ -1,15 +1,18 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Page Code
- * Página:   Centri Sales (solo miembros con el rol «Centri Sales»)
- * VERSION:  1.0.0 (BETA)
+ * Página:   Centri Sales (solo miembros con el rol «AppVentas»)
+ * VERSION:  1.0.1 (BETA)
  * FECHA:    25 Octubre 2026
+ *
+ * v1.0.1 — 25 OCT 2026 · Solo comentarios: el rol se llama «AppVentas».
+ *   Requiere centriSalesClientes v1.2.1 y centriSalesVisitas v1.0.1.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * QUÉ HACE
  * ───────────────────────────────────────────────────────────────────────────
  * Puente entre el custom element <centri-sales> y los webMethods:
- *   · backend/centriSalesClientes.web.js v1.2.0
- *   · backend/centriSalesVisitas.web.js  v1.0.0
+ *   · backend/centriSalesClientes.web.js v1.2.1
+ *   · backend/centriSalesVisitas.web.js  v1.0.1
  *
  *   1. Registra el listener 'sales-rpc' ANTES de enviar la config.
  *      El element emite { reqId, metodo, args }; aquí se llama al webMethod
@@ -22,7 +25,7 @@
  *   a /_functions/centriSalesLabTranscribir y /_functions/centriSalesLabInforme
  *   (el audio no cabe en un atributo, que trunca a ~64 KB).
  *
- * El control de acceso (sesión + rol «Centri Sales» + ficha en `equipo`) lo
+ * El control de acceso (sesión + rol «AppVentas» + ficha en `equipo`) lo
  * hace CADA webMethod en el servidor. Este archivo no decide nada.
  *
  * ───────────────────────────────────────────────────────────────────────────
@@ -50,7 +53,7 @@ import {
 
 const EL_ID = '#centriSales';   // ← ajustar si el Element ID del editor difiere
 
-const V = 'CENTRI SALES Page v1.0.0';
+const V = 'CENTRI SALES Page v1.0.1';
 
 // Métodos que el element puede pedir. Cualquier otro nombre se rechaza.
 const METODOS = {
