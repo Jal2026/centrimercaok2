@@ -1,8 +1,14 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Clientes (Wix Velo)
  * Archivo:  backend/centriSalesClientes.web.js
- * VERSION:  1.3.0
+ * VERSION:  1.3.1
  * FECHA:    25 Octubre 2026
+ *
+ * v1.3.1 — 25 OCT 2026 · Dirección completa otra vez. La 1.3.0 montaba
+ *   «calle, ciudad» con addressLine + city, pero en la prueba real solo
+ *   salía la calle. Vuelve a usar `formatted` (lo que funcionaba en la
+ *   1.2.1: calle, ciudad, CP y país), con los saltos de línea como comas.
+ *   Si no hay `formatted`, calle + ciudad como en la 1.3.0.
  *
  * v1.3.0 — 25 OCT 2026 · DÓNDE VA CADA DATO (decisión de Jal al importar
  *   los 2.167 clientes del ERP):
@@ -172,7 +178,7 @@ import { currentMember } from 'wix-members-backend';
 import { elevate } from 'wix-auth';
 import { contacts } from 'wix-crm-backend';
 
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 const TAG = `[CentriSalesClientes][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -409,9 +415,9 @@ function formatearContacto(contact, tiposPorClave) {
   // v1.3.0: la importación guarda addressLine + city (leído por API el 25-oct);
   // el alta desde la app guarda streetAddress.name + formatted.
   const calle = dir0.addressLine || (dir0.streetAddress && dir0.streetAddress.name) || '';
-  const direccion = calle
-    ? [calle, dir0.city].filter(Boolean).join(', ')
-    : String(dir0.formatted || '').split('\n')[0];
+  // v1.3.1: primero `formatted` (dirección completa), saltos de línea → comas
+  const formateada = String(dir0.formatted || '').split('\n').map(x => x.trim()).filter(Boolean).join(', ');
+  const direccion = formateada || [calle, dir0.city].filter(Boolean).join(', ');
   // v1.2.0 — coordenadas de los campos personalizados (no de address.location)
   const ubicacion = _leerUbicacion(contact?.info?.extendedFields);
   const claves = Array.isArray(contact?.info?.labelKeys) ? contact.info.labelKeys : [];
