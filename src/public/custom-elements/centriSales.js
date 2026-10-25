@@ -2,8 +2,12 @@
  * CENTRIMERCA — CENTRI SALES · App de los comerciales (Wix Custom Element)
  * Archivo:  public/custom-elements/centriSales.js
  * Tag name: centri-sales
- * VERSION:  1.0.0 (BETA)
+ * VERSION:  1.0.1 (BETA)
  * FECHA:    25 Octubre 2026
+ *
+ * v1.0.1 — 25 OCT 2026 · Cliente nuevo: fuera el campo «Persona de contacto».
+ *   En los contactos, Nombre = nombre comercial y Compañía = nombre fiscal;
+ *   la persona ya no tiene sitio (centriSalesClientes v1.3.0 no la guarda).
  *
  * ───────────────────────────────────────────────────────────────────────────
  * QUÉ ES
@@ -67,7 +71,7 @@
     return;
   }
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.0.1';
   const TAG = `[CENTRI SALES v${VERSION}]`;
 
   // ── Servidor ──
@@ -1401,7 +1405,6 @@
         <div class="scroll grow pad-l g14 col">
           ${campo('fNegocio', 'Nombre del negocio', f.negocio, 'text', true)}
           ${campo('fTelefono', 'Teléfono', f.telefono, 'tel', true)}
-          ${campo('fPersona', 'Persona de contacto', f.persona)}
           ${campo('fDireccion', 'Dirección', f.direccion)}
           <div class="aviso-loc"><span class="i22">${ico('pin')}</span>Se guarda tu ubicación actual como la del cliente.</div>
         </div>
