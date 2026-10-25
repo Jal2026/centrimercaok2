@@ -2,8 +2,24 @@
  * CENTRIMERCA — CENTRI SALES · App de los comerciales (Wix Custom Element)
  * Archivo:  public/custom-elements/centriSales.js
  * Tag name: centri-sales
- * VERSION:  1.0.4 (BETA)
+ * VERSION:  1.0.5 (BETA)
  * FECHA:    25 Octubre 2026
+ *
+ * v1.0.5 — 25 OCT 2026 · Prueba en móvil de Jal:
+ *   1. TICKET DE GASTO (pantallas del prototipo): «Añadir ticket» junto a
+ *      «Corregir» abre la cámara del móvil (en escritorio, elegir archivo).
+ *      La foto se reduce en el móvil (TICKET_MAX_PX, JPEG) y va por fetch a
+ *      /_functions/centriSalesTicket (centriSalesLab v1.4.0 + http-functions
+ *      v1.0.5). Se lee → «Ticket de gasto» (categoría, total, fecha,
+ *      comercio; Repetir foto / Guardar ticket). No se lee → «No se lee
+ *      bien el ticket». Al guardar, el ticket va dentro del informe
+ *      (informe.ticket) y se ve en el informe y al reabrir la visita.
+ *      Cámara: input de archivo con capture (cámara nativa del móvil), no un
+ *      visor propio como el del prototipo.
+ *   2. FECHA DE LA PRÓXIMA ACCIÓN: tocar el calendario abre el selector de
+ *      fecha del móvil y se puede fijar o cambiar.
+ *   3. Al marcar Sí/No, cambiar el resultado o la fecha, el informe ya no
+ *      salta arriba: se conserva el desplazamiento.
  *
  * v1.0.4 — 25 OCT 2026 · Prueba real de Jal:
  *   1. ENVIAR INFORME: al pulsar en la parte de arriba del botón se abría
@@ -98,12 +114,15 @@
     return;
   }
 
-  const VERSION = '1.0.4';
+  const VERSION = '1.0.5';
   const TAG = `[CENTRI SALES v${VERSION}]`;
 
   // ── Servidor ──
   const ENDPOINT_TRANSCRIBIR = '/_functions/centriSalesLabTranscribir';
   const ENDPOINT_INFORME     = '/_functions/centriSalesLabInforme';
+  const ENDPOINT_TICKET      = '/_functions/centriSalesTicket';   // v1.0.5
+  const TICKET_MAX_PX        = 1600;    // lado largo de la foto del ticket
+  const TICKET_CALIDAD       = 0.82;    // JPEG
   const RPC_TIMEOUT_MS       = 30000;
 
   // ── Micrófono del nombre del cliente — mismos valores que centriConsole v1.0.4 ──
@@ -202,7 +221,11 @@
     x: ['M18 6 6 18', 'm6 6 12 12'],
     home: ['M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8', 'M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'],
     lock: ['M7 11V7a5 5 0 0 1 10 0v4', 'M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z'],
-    user: [cc(12, 8, 5), 'M20 21a8 8 0 0 0-16 0']
+    user: [cc(12, 8, 5), 'M20 21a8 8 0 0 0-16 0'],
+    // v1.0.5 — del prototipo (window.CMIcons)
+    camera: ['M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z', cc(12, 13, 3)],
+    fuel: ['M3 22h12', 'M4 9h10', 'M14 22V4a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v18', 'M14 13h2a2 2 0 0 1 2 2v2a2 2 0 0 0 2 2a2 2 0 0 0 2-2V9.83a2 2 0 0 0-.59-1.42L18 5'],
+    receipt: ['M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z', 'M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8', 'M12 17.5v-11']
   };
   function ico(nombre) {
     const d = ICONOS[nombre] || [];
@@ -231,6 +254,25 @@
   };
   function etiqueta(campo, v) { return (ETIQUETAS[campo] && ETIQUETAS[campo][v]) || v || '—'; }
   const NIVEL_INTERES = { alto: 3, medio: 2, bajo: 1, indeterminado: 0 };
+
+  // v1.0.5 — categorías del ticket (las de CATEGORIAS_TICKET de centriSalesLab v1.4.0)
+  const CATEGORIAS_TICKET = {
+    combustible: { label: 'Combustible', icon: 'fuel' },
+    parking:     { label: 'Parking',     icon: 'receipt' },
+    peaje:       { label: 'Peaje',       icon: 'receipt' },
+    comida:      { label: 'Comida',      icon: 'receipt' },
+    alojamiento: { label: 'Alojamiento', icon: 'receipt' },
+    otro:        { label: 'Otro gasto',  icon: 'receipt' }
+  };
+  function euros(n) {
+    const v = Number(n);
+    if (!isFinite(v)) return '';
+    return v.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '\u00a0€';
+  }
+  function fechaCorta(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
+  }
 
   // ═════════════════════════════════════════════════════════════════════════
   // UTILIDADES
@@ -355,6 +397,8 @@
       this._tick = null;
       this._reabierta = false;   // v1.0.4: informe de una visita ya enviada
       this._cambiada = false;
+      this._ticketLeido = null;  // v1.0.5: ticket leído, pendiente de «Guardar ticket»
+      this._ultimaPintada = '';  // v1.0.5: para conservar el desplazamiento
     }
 
     connectedCallback() {
@@ -1163,6 +1207,137 @@
       catch (e) { this._setMicState('idle'); input.placeholder = this._brand.placeholder; }
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // TICKET DE GASTO (v1.0.5)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    _abrirCamaraTicket() {
+      const i = this.shadowRoot.getElementById('fTicket');
+      if (i) i.click();
+    }
+
+    /** Reduce la foto en el móvil: lado largo TICKET_MAX_PX, JPEG. Devuelve base64 sin prefijo. */
+    async _prepararFoto(file) {
+      const url = URL.createObjectURL(file);
+      try {
+        const img = await new Promise((resolve, reject) => {
+          const im = new Image();
+          im.onload = () => resolve(im);
+          im.onerror = () => reject(new Error('No se pudo abrir la foto'));
+          im.src = url;
+        });
+        const k = Math.min(1, TICKET_MAX_PX / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+        const w = Math.max(1, Math.round(img.naturalWidth * k));
+        const h = Math.max(1, Math.round(img.naturalHeight * k));
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        const dataUrl = cv.toDataURL('image/jpeg', TICKET_CALIDAD);
+        return dataUrl.slice(dataUrl.indexOf(',') + 1);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+
+    async _leerTicket(file) {
+      if (!this._informe) return;
+      this._go('leyendoTicket');
+      let imagen;
+      try { imagen = await this._prepararFoto(file); }
+      catch (e) {
+        console.warn(`${TAG} ticket: ${(e && e.message) || 'foto no válida'}`);
+        this._go('badticket');
+        return;
+      }
+      let r;
+      try {
+        const res = await this._fetchConReintento(ENDPOINT_TICKET, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imagen, mime: 'image/jpeg' })
+        }, 'ticket');
+        r = res.ok ? await res.json() : { ok: false, error: `HTTP ${res.status}` };
+      } catch (e) {
+        r = { ok: false, error: (e && e.message) || 'error de red' };
+      }
+      if (this._screen !== 'leyendoTicket') return;   // salió de la pantalla
+      if (r && r.ok && r.ticket && r.ticket.legible) {
+        this._ticketLeido = r.ticket;
+        this._go('ticket');
+        return;
+      }
+      if (r && r.ok && r.ticket && r.ticket.legible === false) { this._go('badticket'); return; }
+      console.warn(`${TAG} ticket: ${(r && r.error) || 'sin respuesta'}`);
+      this._go('report');
+      this._toast('No se pudo leer el ticket. Inténtalo otra vez.');
+    }
+
+    _guardarTicket() {
+      if (!this._informe || !this._ticketLeido) { this._go('report'); return; }
+      const t = this._ticketLeido;
+      this._informe.ticket = { categoria: t.categoria, total_eur: t.total_eur, fecha: t.fecha || null, comercio: t.comercio || '', foto: t.foto || '' };
+      this._ticketLeido = null;
+      this._cambiada = true;
+      this._go('report');
+      this._toast('Ticket guardado en el informe.');
+    }
+
+    _tarjetaTicket(t) {
+      if (!t || !isFinite(Number(t.total_eur))) return '';
+      const cat = CATEGORIAS_TICKET[t.categoria] || CATEGORIAS_TICKET.otro;
+      return `<div class="caja fila-ticket">
+        <span class="tk-i">${ico(cat.icon)}</span>
+        <span class="tk-t">Ticket · ${this._escape(cat.label)}${t.comercio ? ` · ${this._escape(t.comercio)}` : ''}</span>
+        <span class="tk-v">${this._escape(euros(t.total_eur))}</span>
+      </div>`;
+    }
+
+    _vLeyendoTicket() {
+      return `<div class="centro full g28 pad">
+        <span class="fruta">${ico('receipt')}</span>
+        <div class="t-28 tc">Leyendo el ticket…</div>
+      </div>`;
+    }
+
+    _vTicket() {
+      const t = this._ticketLeido || {};
+      const cat = CATEGORIAS_TICKET[t.categoria] || CATEGORIAS_TICKET.otro;
+      return `<div class="col">
+        <div class="cab">
+          <button class="atras" data-accion="volverInforme" aria-label="Volver al informe">${ico('back')}</button>
+          <div class="cab-t"><span class="cab-tit">Ticket de gasto</span></div>
+        </div>
+        <div class="col grow g14 pad-l scroll">
+          <div class="caja tk-grande">
+            <span class="tk-disco">${ico(cat.icon)}</span>
+            <span class="tk-cat">${this._escape(cat.label)}</span>
+            <span class="tk-total">${this._escape(euros(t.total_eur))}</span>
+          </div>
+          <div class="caja tk-datos">
+            <div class="tk-fila"><span class="t-gris16">Fecha</span><b>${this._escape(fechaCorta(t.fecha) || '—')}</b></div>
+            <div class="tk-fila"><span class="t-gris16">Comercio</span><b>${this._escape(t.comercio || '—')}</b></div>
+          </div>
+          <button class="btn btn-gris btn-64" data-accion="ticket"><span class="i24">${ico('camera')}</span>Repetir foto</button>
+          <div class="grow"></div>
+          <button class="btn btn-azul btn-84" data-accion="guardarTicket"><span class="i28">${ico('check')}</span>Guardar ticket</button>
+        </div>
+      </div>`;
+    }
+
+    _vBadTicket() {
+      return `<div class="col">
+        <div class="centro grow g18 pad">
+          <span class="disco disco-fucsia">${ico('alert')}</span>
+          <div class="t-titulo">No se lee bien el ticket</div>
+          <div class="t-texto">Busca más luz y que salga entero, sin dobleces.</div>
+        </div>
+        <div class="pie">
+          <button class="btn btn-azul btn-84" data-accion="ticket"><span class="i30">${ico('camera')}</span>Repetir foto</button>
+          <button class="btn btn-borde btn-68" data-accion="volverInforme">Ahora no</button>
+        </div>
+      </div>`;
+    }
+
     // Adaptadores de lo que el código literal espera encontrar en CENTRI
     _crearAdaptadorInput() {
       // Misma interfaz que el <textarea> de CENTRI: value y placeholder.
@@ -1228,6 +1403,11 @@
     _bindEvents() {
       const r = this.shadowRoot;
       r.addEventListener('click', (ev) => {
+        // v1.0.5 — calendario de la próxima acción: abrir el selector del sistema
+        if (ev.target && ev.target.id === 'fFecha') {
+          try { if (typeof ev.target.showPicker === 'function') ev.target.showPicker(); } catch (_) {}
+          return;
+        }
         const el = ev.target.closest('[data-accion]');
         if (!el || el.disabled) return;
         const a = el.dataset.accion;
@@ -1265,12 +1445,31 @@
             break;
           }
           case 'corregir': this._corregir(); break;
+          case 'ticket': this._abrirCamaraTicket(); break;               // v1.0.5
+          case 'guardarTicket': this._guardarTicket(); break;
+          case 'volverInforme': this._ticketLeido = null; this._go('report'); break;
           case 'enviar': this._enviar(); break;
           default: break;
         }
       });
       r.addEventListener('input', (ev) => {
         if (ev.target && ev.target.id === 'fBuscar') this._alEscribir(ev.target.value);
+      });
+      // v1.0.5 — foto del ticket y fecha de la próxima acción
+      r.addEventListener('change', (ev) => {
+        const t = ev.target;
+        if (!t) return;
+        if (t.id === 'fTicket') {
+          const f = t.files && t.files[0];
+          t.value = '';
+          if (f) this._leerTicket(f);
+        } else if (t.id === 'fFecha' && this._informe) {
+          const pa = Object.assign({}, this._informe.proxima_accion || {});
+          pa.fecha = t.value || null;
+          this._informe.proxima_accion = pa;
+          this._cambiada = true;
+          this._pintar();
+        }
       });
     }
 
@@ -1300,11 +1499,20 @@
         error: () => this._vError(),
         report: () => this._vReport(),
         sent: () => this._vSent(),
-        offline: () => this._vOffline()
+        offline: () => this._vOffline(),
+        leyendoTicket: () => this._vLeyendoTicket(),   // v1.0.5
+        ticket: () => this._vTicket(),
+        badticket: () => this._vBadTicket()
       }[this._screen] || (() => '');
+      // v1.0.5: si se repinta la misma pantalla, se conserva el desplazamiento
+      const misma = this._ultimaPintada === this._screen;
+      const prev = box.querySelector('.scroll');
+      const y = misma && prev ? prev.scrollTop : 0;
       box.innerHTML = fn();
+      this._ultimaPintada = this._screen;
       if (this._screen === 'pick') this._pintarResultadosEscritos();
       box.scrollTop = 0;
+      if (y) { const nuevo = box.querySelector('.scroll'); if (nuevo) nuevo.scrollTop = y; }
     }
 
     _cabecera(titulo, subtitulo) {
@@ -1670,7 +1878,7 @@
             </div>
             ${(productos || objeciones || bloqueAlertas) ? `<div class="caja g12">${productos}${objeciones}${bloqueAlertas}</div>` : ''}
             <div class="caja fila-pa">
-              <span class="cal"><span class="cal-h">FECHA</span>${cal}</span>
+              <label class="cal"><span class="cal-h">FECHA</span>${cal}<input id="fFecha" class="cal-in" type="date" value="${this._escape(pa.fecha || '')}" aria-label="Fecha de la próxima acción"></label>
               <span class="pa"><span class="t-gris16">Próxima acción</span><span class="pa-t">${this._escape(pa.descripcion || 'No has dicho ninguna')}</span>${pa.responsable ? `<span class="pa-r"><span class="i16">${ico('user')}</span>${this._escape(etiqueta('responsable', pa.responsable))}</span>` : ''}</span>
             </div>
             ${sg.descripcion ? `<div class="caja sug">
@@ -1683,7 +1891,11 @@
               <span class="loc-i">${ico('pin')}</span>
               <span class="loc-t"><span class="loc-l">${this._escape(this._ubicacionTexto())}</span>${mapa}</span>
             </div>
-            <button class="btn btn-borde btn-72" data-accion="corregir"><span class="i24 fucsia">${ico('mic')}</span>Corregir</button>
+            ${this._tarjetaTicket(inf.ticket)}
+            <div class="fila-btns">
+              <button class="btn btn-borde btn-72" data-accion="corregir"><span class="i24 fucsia">${ico('mic')}</span>Corregir</button>
+              <button class="btn btn-gris btn-72" data-accion="ticket"><span class="i24">${ico('camera')}</span>${inf.ticket ? 'Otro ticket' : 'Añadir ticket'}</button>
+            </div>
             <div class="aire"></div>
           </div>
         </div>
@@ -1982,6 +2194,25 @@
   .loc-t a { font-size: 16px; font-weight: 600; }
   .barra-enviar { flex: none; position: relative; z-index: 5; padding: 12px 16px calc(26px + env(safe-area-inset-bottom)); background: ${C.blanco}; border-top: 1px solid ${C.linea}; }
   .aire { height: 28px; flex: none; }
+  /* v1.0.5 — ticket y calendario */
+  .fila-btns { display: flex; gap: 10px; flex: none; }
+  .fila-btns .btn { flex: 1; width: auto; font-size: 18px; gap: 8px; }
+  .cal { position: relative; cursor: pointer; }
+  .cal-in { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; padding: 0; margin: 0; cursor: pointer; }
+  .fila-ticket { flex-direction: row; align-items: center; gap: 12px; padding: 16px 18px; animation: fade .3s both; }
+  .tk-i { width: 44px; height: 44px; flex: none; border-radius: 50%; background: ${C.verdeCla}; color: ${C.verdeOsc}; display: flex; align-items: center; justify-content: center; }
+  .tk-i svg { width: 24px; height: 24px; }
+  .tk-t { flex: 1; min-width: 0; font-size: 17px; font-weight: 600; color: ${C.verdeOsc}; overflow-wrap: anywhere; }
+  .tk-v { font-size: 19px; font-weight: 700; color: ${C.verdeNeg}; white-space: nowrap; }
+  .tk-grande { align-items: center; text-align: center; gap: 10px; padding: 22px 18px; animation: fade .3s both; }
+  .tk-disco { width: 88px; height: 88px; border-radius: 50%; background: ${C.verdeCla}; color: ${C.verdeOsc}; display: flex; align-items: center; justify-content: center; }
+  .tk-disco svg { width: 44px; height: 44px; }
+  .tk-cat { font-size: 20px; font-weight: 700; color: ${C.verdeOsc}; }
+  .tk-total { font-size: 56px; font-weight: 700; color: ${C.verdeNeg}; line-height: 1; font-variant-numeric: tabular-nums; }
+  .tk-datos { padding: 6px 18px; }
+  .tk-fila { min-height: 60px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .tk-fila + .tk-fila { border-top: 1px solid ${C.linea}; }
+  .tk-fila b { font-size: 18px; text-align: right; overflow-wrap: anywhere; }
   .enviar { width: 100%; height: 96px; border-radius: 28px; background: ${C.fucsia}; color: ${C.blanco}; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; letter-spacing: .04em; box-shadow: 0 14px 28px -14px rgba(232,10,77,.7); transition: transform .1s; }
   .enviar:disabled { opacity: .7; }
 
@@ -1999,6 +2230,7 @@
 <div class="app">
   <div id="pantalla"></div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <input id="fTicket" type="file" accept="image/*" capture="environment" hidden>
 </div>`;
       this._pintar();
     }
