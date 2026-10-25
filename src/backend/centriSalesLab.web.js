@@ -1,8 +1,14 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Banco de pruebas · Transcripción + informe (Wix Velo)
  * Archivo:  backend/centriSalesLab.web.js
- * VERSION:  1.3.0
+ * VERSION:  1.3.1
  * FECHA:    25 Octubre 2026
+ *
+ * v1.3.1 — 25 OCT 2026 · En la segunda prueba real el resumen puso al
+ *   cliente («Cándido Ávila», nombre comercial del negocio) como una de las
+ *   personas de la reunión. Ahora el nombre llega marcado como nombre del
+ *   negocio y hay una regla: no contarlo como persona salvo que el reporte
+ *   diga que estuvo.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * CAMBIOS v1.2.0 → v1.3.0 — primera prueba real de la beta (Jal, 25-oct)
@@ -144,7 +150,7 @@ import { getSecret } from 'wix-secrets-backend';
 import crypto from 'crypto';
 
 // El TAG se deriva de VERSION (patrón de centriTTS.web.js).
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 const V = `CENTRI_SALES_LAB v${VERSION}`;
 
 const STT_ENDPOINT   = 'https://speech.googleapis.com/v1/speech:recognize';
@@ -347,6 +353,8 @@ function _systemInforme(hoy) {
     '- La transcripción viene de voz y puede tener errores. Corrige términos del sector solo cuando sea evidente por el contexto (p. ej. "rappers" → rappel, "palet" → palé). Nunca corrijas nombres de clientes ni de personas.',
     // v1.3.0: 35 → 90 palabras y contenido obligatorio (prueba real: se perdían asistentes y ánimo del cliente)
     '- Quita muletillas y repeticiones ("bueno", "pues", "o sea"). El resumen va en tercera persona, neutro, máximo 90 palabras, en frases cortas.',
+    // v1.3.1: el nombre del cliente es el del negocio
+    '- El nombre del cliente es el nombre comercial del NEGOCIO. No lo pongas entre las personas de la visita salvo que el reporte diga que esa persona estuvo.',
     '- El resumen recoge, si el reporte lo dice: quién estuvo en la visita (personas y su relación, p. ej. «los dos hermanos y el padre»), cómo está el cliente (contento, molesto, preocupado…) y por qué, qué se habló y en qué quedó. Después, los hechos, peticiones y condiciones del cliente. No omitas a las personas ni el ánimo del cliente por ahorrar palabras.',
     // v1.2.0: fallos de la prueba real (negación mal leída y condición perdida)
     '- Respeta el sentido exacto de cada hecho y mantén las negaciones: «no le servimos los sábados» significa que no se le sirve ese día; no lo conviertas en un retraso ni en una incidencia de entrega.',
@@ -468,7 +476,7 @@ export async function informePruebaCore({ texto, cliente }) {
     const hoy = _hoyMadrid();
     const user = [
       'CLIENTE DE LA VISITA:',
-      `- Nombre: ${_texto(c.nombre, 120) || 'sin indicar'}`,
+      `- Nombre comercial del negocio (no es una persona): ${_texto(c.nombre, 120) || 'sin indicar'}`,   // v1.3.1
       c.tipo ? `- Tipo: ${_texto(c.tipo, 60)}` : null,
       c.zona ? `- Zona: ${_texto(c.zona, 60)}` : null,
       '',
