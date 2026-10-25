@@ -1,8 +1,11 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Visitas (Wix Velo)
  * Archivo:  backend/centriSalesVisitas.web.js
- * VERSION:  1.0.0
+ * VERSION:  1.0.1
  * FECHA:    25 Octubre 2026
+ *
+ * v1.0.1 — 25 OCT 2026 · Único cambio: ROL_AUTORIZADO pasa de 'Centri Sales'
+ *   a 'AppVentas' (nombre real del rol en el site).
  *
  * ───────────────────────────────────────────────────────────────────────────
  * QUÉ ES
@@ -66,7 +69,7 @@ import { webMethod, Permissions } from 'wix-web-module';
 import wixData from 'wix-data';
 import { currentMember } from 'wix-members-backend';
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const TAG = `[CentriSalesVisitas][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -102,12 +105,12 @@ const MAX_TRANSCRIPCION = 8000;   // el mismo tope que MAX_TEXTO del informe
 // servidor más de esto (relojes mal puestos); si no, cuenta la del servidor.
 const MARGEN_TS_MS = 2 * 60 * 60 * 1000;
 
-// ── Usuarios de la app — COPIA LITERAL de centriSalesClientes.web.js v1.2.0 ──
+// ── Usuarios de la app — COPIA LITERAL de centriSalesClientes.web.js v1.2.1 ──
 // ── Usuarios de la app (v1.1.0) ─────────────────────────────────────────────
 // Rol de miembro exigido (nombre o _id del rol). ⚠️ El rol tiene que llamarse
 // EXACTAMENTE así en los roles de miembro del site. No dejarlo vacío: vacío =
 // basta con tener sesión, y en este site los clientes B2B también son miembros.
-const ROL_AUTORIZADO = 'Centri Sales';
+const ROL_AUTORIZADO = 'AppVentas';
 
 const C_EQUIPO = 'equipo';   // ID real (minúscula), el mismo que centriEquipo.web.js
 const LIMITE_EQUIPO = 1000;  // idéntico a LIMITE de centriEquipo.web.js
