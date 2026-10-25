@@ -2,8 +2,24 @@
  * CENTRIMERCA — CENTRI SALES · App de los comerciales (Wix Custom Element)
  * Archivo:  public/custom-elements/centriSales.js
  * Tag name: centri-sales
- * VERSION:  1.0.1 (BETA)
+ * VERSION:  1.0.3 (BETA)
  * FECHA:    25 Octubre 2026
+ *
+ * v1.0.3 — 25 OCT 2026 · Tarjetas de cliente con los DOS nombres: el
+ *   comercial de título y el fiscal debajo (cuando es distinto), luego la
+ *   dirección. «Hermanos Martín» encontraba bien a CANDIDO AVILA. (fiscal
+ *   HERMANOS MARTIN C.B.), pero la tarjeta no enseñaba por qué.
+ *   (`persona` = nombre fiscal desde centriSalesClientes v1.3.0.)
+ *   En las búsquedas escritas los tres datos van uno debajo de otro.
+ *
+ * v1.0.2 — 25 OCT 2026 · Decir el nombre del cliente: en escritorio había
+ *   que hablar dos veces. La pantalla decía «Te escucho…» nada más tocar el
+ *   micro, pero el navegador aún no estaba recogiendo audio y lo primero que
+ *   se decía se perdía. El código literal del micrófono ya avisa del estado
+ *   («Preparando micrófono…» al arrancar, «Te escucho…» cuando de verdad
+ *   entra audio) por el placeholder del input; el adaptador lo ignoraba.
+ *   Ahora lo pinta: hasta que entra audio sale «Preparando micrófono…» con
+ *   el punto en gris, y «Te escucho…» con el punto en fucsia después.
  *
  * v1.0.1 — 25 OCT 2026 · Cliente nuevo: fuera el campo «Persona de contacto».
  *   En los contactos, Nombre = nombre comercial y Compañía = nombre fiscal;
@@ -71,7 +87,7 @@
     return;
   }
 
-  const VERSION = '1.0.1';
+  const VERSION = '1.0.3';
   const TAG = `[CENTRI SALES v${VERSION}]`;
 
   // ── Servidor ──
@@ -1113,7 +1129,8 @@
           this._v = String(v == null ? '' : v);
           self._pintarDicho(this._v);
         },
-        set placeholder(p) { /* el estado lo pinta la pantalla */ },
+        // v1.0.2: el código literal avisa aquí del estado del micrófono
+        set placeholder(p) { self._pintarEstadoMic(p); },
         get placeholder() { return ''; }
       };
     }
@@ -1134,6 +1151,15 @@
       if (codigo === 'not-allowed' || codigo === 'service-not-allowed' || codigo === 'audio-capture') {
         if (this._screen === 'listening') this._go('pick');
       }
+    }
+    // v1.0.2 — «Preparando micrófono…» hasta que entra audio; luego «Te escucho…»
+    _pintarEstadoMic(p) {
+      const t = String(p || '');
+      if (!t) return;
+      const caja = this.shadowRoot.getElementById('estadoMic');
+      const txt = this.shadowRoot.getElementById('estadoMicTxt');
+      if (txt) txt.textContent = t;
+      if (caja) caja.classList.toggle('activo', t === 'Te escucho…');
     }
     _pintarDicho(t) {
       const el = this.shadowRoot.getElementById('dicho');
@@ -1330,7 +1356,7 @@
       if (this._buscando && !this._resultadosEscritos.length) { box.innerHTML = '<div class="nota">Buscando…</div>'; return; }
       if (!this._resultadosEscritos.length) { box.innerHTML = '<div class="nota">No encuentro ese cliente</div>'; return; }
       box.innerHTML = `<div class="hits">${this._resultadosEscritos.map((c) => `
-        <button class="hit" data-accion="elegir" data-arg="${this._escape(c.contactId)}"><span class="hit-n">${this._escape(c.negocio || c.persona)}</span><span class="hit-z">${this._escape(this._subCliente(c))}</span></button>`).join('')}</div>`;
+        <button class="hit" data-accion="elegir" data-arg="${this._escape(c.contactId)}"><span class="hit-t"><span class="hit-n">${this._escape(c.negocio || c.persona)}</span>${this._lineaFiscal(c)}</span><span class="hit-z">${this._escape(this._subCliente(c))}</span></button>`).join('')}</div>`;
     }
 
     _vListening() {
@@ -1341,7 +1367,7 @@
           <button class="mic-pulso" data-accion="terminarDictado" aria-label="Terminar">
             <span class="onda"></span><span class="onda o2"></span><span class="mic-176 fijo">${ico('mic')}</span>
           </button>
-          <div class="escucho"><span class="punto"></span>Te escucho…</div>
+          <div class="escucho" id="estadoMic"><span class="punto"></span><span id="estadoMicTxt">Preparando micrófono…</span></div>
         </div>
       </div>`;
     }
@@ -1351,10 +1377,16 @@
         <div class="centro grow g28 pad"><span class="fruta">${ico('citrus')}</span><div class="t-gris">Buscando «${this._escape(this._dicho)}»…</div></div></div>`;
     }
 
+    // v1.0.3 — nombre fiscal (llega como `persona`) cuando no repite el comercial
+    _lineaFiscal(c) {
+      const f = String(c.persona || '').trim();
+      if (!f || !c.negocio || f.toUpperCase() === String(c.negocio).trim().toUpperCase()) return '';
+      return `<span class="m-f">${this._escape(f)}</span>`;
+    }
+
     _subCliente(c) {
       const partes = [];
-      if (c.direccion) partes.push(c.direccion);
-      else if (c.persona && c.negocio) partes.push(c.persona);
+      if (c.direccion) partes.push(c.direccion);   // v1.0.3: el nombre fiscal va en su propia línea
       const d = distanciaM(this._posicion, c.ubicacion);
       if (d !== null) partes.push(`a ${textoDistancia(d)}`);
       if (c.tipo === 'prospecto') partes.push('nuevo');
@@ -1366,7 +1398,7 @@
         <button class="match ${n === 0 ? 'mejor' : ''}" data-accion="elegir" data-arg="${this._escape(c.contactId)}">
           ${n === 0 ? '<span class="badge">Más probable</span>' : ''}
           <span class="m-ini">${this._escape(inicial(c.negocio || c.persona))}</span>
-          <span class="m-t"><span class="m-n">${this._escape(c.negocio || c.persona)}</span><span class="m-z">${this._escape(this._subCliente(c))}</span></span>
+          <span class="m-t"><span class="m-n">${this._escape(c.negocio || c.persona)}</span>${this._lineaFiscal(c)}<span class="m-z">${this._escape(this._subCliente(c))}</span></span>
           <span class="m-ok">${ico('check')}</span>
         </button>`).join('');
       return `<div class="col">
@@ -1416,7 +1448,7 @@
       const cards = this._parecidos.map((c) => `
         <button class="match" data-accion="elegir" data-arg="${this._escape(c.contactId)}">
           <span class="m-ini">${this._escape(inicial(c.negocio || c.persona))}</span>
-          <span class="m-t"><span class="m-n">${this._escape(c.negocio || c.persona)}</span><span class="m-z">${this._escape(this._subCliente(c))}</span></span>
+          <span class="m-t"><span class="m-n">${this._escape(c.negocio || c.persona)}</span>${this._lineaFiscal(c)}<span class="m-z">${this._escape(this._subCliente(c))}</span></span>
           <span class="m-ok">${ico('check')}</span>
         </button>`).join('');
       return `<div class="col">
@@ -1789,6 +1821,9 @@
   .cursor { color: ${C.fucsia}; animation: blink 1s infinite; }
   .escucho, .grabando { display: flex; align-items: center; gap: 8px; font-weight: 600; }
   .escucho { font-size: 20px; color: ${C.gris}; }
+  .escucho .punto { background: ${C.linea}; animation: none; }
+  .escucho.activo { color: ${C.verdeNeg}; }
+  .escucho.activo .punto { background: ${C.fucsia}; animation: blink 1s infinite; }
   .punto { width: 12px; height: 12px; border-radius: 50%; background: ${C.fucsia}; animation: blink 1s infinite; }
   .rec-cab { flex: none; display: flex; flex-direction: column; padding: 16px 24px 0; }
   .grabando { font-size: 16px; color: ${C.fucsia}; font-weight: 700; }
@@ -1800,9 +1835,9 @@
   .buscador { min-height: 64px; border-radius: 20px; background: ${C.blanco}; border: 2px solid ${C.linea}; display: flex; align-items: center; gap: 12px; padding: 0 18px; color: ${C.gris}; flex: none; }
   .buscador input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font: inherit; font-size: 18px; color: ${C.tinta}; }
   .hits { display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; }
-  .hit { min-height: 64px; border-radius: 18px; background: ${C.blanco}; border: 1px solid ${C.linea}; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; flex: none; }
+  .hit { min-height: 64px; border-radius: 18px; background: ${C.blanco}; border: 1px solid ${C.linea}; padding: 10px 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; flex: none; text-align: left; }
   .hit-n { font-size: 17px; font-weight: 700; }
-  .hit-z { font-size: 15px; color: ${C.gris}; text-align: right; }
+  .hit-z { font-size: 15px; color: ${C.verdeOsc}; }
   .match { min-height: 88px; border-radius: 24px; background: ${C.blanco}; border: 1px solid ${C.linea}; padding: 12px 16px; display: flex; align-items: center; gap: 14px; position: relative; width: 100%; flex: none; animation: fade .3s both; }
   .match.mejor { min-height: 108px; margin-top: 8px; background: ${C.verdeCla}; border: 3px solid ${C.verdeAz}; }
   .match:active { transform: scale(.98); }
@@ -1812,6 +1847,9 @@
   .m-t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .m-n { font-size: 19px; font-weight: 700; color: ${C.verdeNeg}; }
   .m-z { font-size: 16px; color: ${C.verdeOsc}; }
+  .m-f { font-size: 15px; font-weight: 600; color: ${C.gris}; overflow-wrap: anywhere; }
+  .m-n, .m-z, .hit-n, .hit-z { overflow-wrap: anywhere; }
+  .hit-t { display: flex; flex-direction: column; min-width: 0; }
   .m-ok { width: 52px; height: 52px; flex: none; border-radius: 50%; background: ${C.verdeAz}; color: ${C.blanco}; display: flex; align-items: center; justify-content: center; }
   .m-ok svg { width: 26px; height: 26px; }
   .disco { width: 120px; height: 120px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
