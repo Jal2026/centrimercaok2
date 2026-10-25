@@ -1,8 +1,26 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Clientes (Wix Velo)
  * Archivo:  backend/centriSalesClientes.web.js
- * VERSION:  1.2.1
+ * VERSION:  1.3.0
  * FECHA:    25 Octubre 2026
+ *
+ * v1.3.0 — 25 OCT 2026 · DÓNDE VA CADA DATO (decisión de Jal al importar
+ *   los 2.167 clientes del ERP):
+ *     · Nombre del contacto (info.name.first) = NOMBRE COMERCIAL → negocio.
+ *     · Compañía (info.company)              = NOMBRE FISCAL.
+ *   Cambios:
+ *     · formatearContacto: negocio sale del nombre; nombreFiscal de company.
+ *       Dirección: addressLine (lo que guarda la importación) o
+ *       streetAddress.name, más la ciudad; si no, formatted.
+ *     · _puntuar: compara con el nombre comercial y con el fiscal.
+ *     · _paraApp: `persona` lleva el nombre fiscal cuando es distinto del
+ *       comercial (la app lo enseña si no hay dirección).
+ *     · centriSalesCrearCliente: el nombre del negocio va a info.name.first.
+ *       La persona de contacto ya no tiene sitio y no se guarda (la app
+ *       v1.0.1 ya no la pide). El nombre fiscal no se conoce en el alta.
+ *
+ * v1.2.1 — 25 OCT 2026 · Único cambio: ROL_AUTORIZADO pasa de 'Centri Sales'
+ *   a 'AppVentas' (nombre real del rol en el site).
  *
  * v1.2.1 — 25 OCT 2026 · Único cambio: ROL_AUTORIZADO pasa de 'Centri Sales'
  *   a 'AppVentas' (nombre real del rol en el site).
@@ -68,10 +86,11 @@
  * por nombre con findOrCreateLabel (patrón de adserverLogic).
  *
  * Dónde va cada dato en el contacto:
- *   · Nombre del negocio → info.company (propiedad nativa).
- *   · Persona de contacto → info.name.first.
+ *   · Nombre comercial → info.name.first (v1.3.0).
+ *   · Nombre fiscal → info.company (v1.3.0).
  *   · Teléfono, email → phones / emails.
- *   · Dirección → addresses[0].address (formatted + streetAddress.name).
+ *   · Dirección → addresses[0].address (addressLine o streetAddress.name,
+ *     city; formatted como último recurso).
  *   · Coordenadas → campos personalizados custom.latitud / custom.longitud
  *     (v1.2.0).
  *
@@ -153,7 +172,7 @@ import { currentMember } from 'wix-members-backend';
 import { elevate } from 'wix-auth';
 import { contacts } from 'wix-crm-backend';
 
-const VERSION = '1.2.1';
+const VERSION = '1.3.0';
 const TAG = `[CentriSalesClientes][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -366,7 +385,8 @@ function _leerUbicacion(ef) {
 }
 
 // Copia literal de formatearContacto() de contactLookup.web.js (KAMISUITE).
-// [SALES] añade negocio (info.company), direccion, ubicacion y tipo.
+// [SALES] añade negocio (v1.3.0: el nombre del contacto), nombreFiscal
+// (info.company), direccion, ubicacion y tipo.
 function formatearContacto(contact, tiposPorClave) {
   const infoName = contact?.info?.name || {};
   const nombre = infoName.first || contact?.name?.first || contact?.firstName || '';
@@ -380,11 +400,18 @@ function formatearContacto(contact, tiposPorClave) {
   const phones = Array.isArray(phonesArray) ? phonesArray : [];
   const telefono = phones[0]?.phone || phones[0] || contact?.primaryPhone || '';
 
-  // [SALES] — negocio, dirección y tipo de cliente
-  const negocio = contact?.info?.company || '';
+  // [SALES] — negocio, nombre fiscal, dirección y tipo de cliente
+  // v1.3.0: Nombre = nombre comercial; Compañía = nombre fiscal.
+  const negocio = `${nombre} ${apellido}`.trim();
+  const nombreFiscal = contact?.info?.company || '';
   const dirArray = contact?.info?.addresses || [];
   const dir0 = (Array.isArray(dirArray) && dirArray[0] && dirArray[0].address) || {};
-  const direccion = dir0.formatted || (dir0.streetAddress && dir0.streetAddress.name) || '';
+  // v1.3.0: la importación guarda addressLine + city (leído por API el 25-oct);
+  // el alta desde la app guarda streetAddress.name + formatted.
+  const calle = dir0.addressLine || (dir0.streetAddress && dir0.streetAddress.name) || '';
+  const direccion = calle
+    ? [calle, dir0.city].filter(Boolean).join(', ')
+    : String(dir0.formatted || '').split('\n')[0];
   // v1.2.0 — coordenadas de los campos personalizados (no de address.location)
   const ubicacion = _leerUbicacion(contact?.info?.extendedFields);
   const claves = Array.isArray(contact?.info?.labelKeys) ? contact.info.labelKeys : [];
@@ -402,7 +429,8 @@ function formatearContacto(contact, tiposPorClave) {
     nombreCompleto: `${nombre} ${apellido}`.trim(),
     email: String(email).trim(),
     telefono: String(telefono).trim(),
-    negocio: String(negocio).trim(),          // [SALES]
+    negocio: String(negocio).trim(),          // [SALES] v1.3.0: del nombre
+    nombreFiscal: String(nombreFiscal).trim(), // [SALES] v1.3.0: de company
     direccion: String(direccion).trim(),      // [SALES]
     ubicacion,                                // [SALES] v1.2.0: de custom.latitud / custom.longitud
     tipo                                      // [SALES] 'cliente' | 'prospecto'
@@ -487,9 +515,9 @@ function _tokens(s) {
 }
 
 /**
- * Parecido de un texto con un cliente: el mejor entre el nombre del negocio
- * y el de la persona de contacto. Devuelve la lista ordenada de mayor a
- * menor, solo con los que llegan a `minimo`.
+ * Parecido de un texto con un cliente: el mejor entre el nombre comercial
+ * y el fiscal (v1.3.0). Devuelve la lista ordenada de mayor a menor, solo
+ * con los que llegan a `minimo`.
  */
 function _puntuar(texto, lista, minimo) {
   const inTok = _tokens(texto);
@@ -497,8 +525,8 @@ function _puntuar(texto, lista, minimo) {
   const out = [];
   for (const c of lista) {
     const sNeg = c.negocio ? nameScore(inTok, _tokens(c.negocio)) : 0;
-    const sPer = c.nombreCompleto ? nameScore(inTok, _tokens(c.nombreCompleto)) : 0;
-    const score = Math.max(sNeg, sPer);
+    const sFis = c.nombreFiscal ? nameScore(inTok, _tokens(c.nombreFiscal)) : 0;
+    const score = Math.max(sNeg, sFis);
     if (score >= minimo) out.push({ c, score });
   }
   out.sort((a, b) => b.score - a.score);
@@ -558,8 +586,8 @@ async function _cargarClientes() {
     }
   }
 
-  // Sin negocio ni persona no hay nada que buscar ni que enseñar.
-  const lista = todos.filter(c => c.contactId && (c.negocio || c.nombreCompleto));
+  // Sin nombre comercial ni fiscal no hay nada que buscar ni que enseñar.
+  const lista = todos.filter(c => c.contactId && (c.negocio || c.nombreFiscal));
 
   _cacheClientes = lista;
   _cacheClientesTs = ahora;
@@ -571,8 +599,10 @@ async function _cargarClientes() {
 function _paraApp(c, score) {
   return {
     contactId: c.contactId,
-    negocio: c.negocio,
-    persona: c.nombreCompleto,
+    negocio: c.negocio || c.nombreFiscal,
+    // v1.3.0: la app enseña `persona` si no hay dirección; ahora es el
+    // nombre fiscal, solo cuando no repite el comercial.
+    persona: c.nombreFiscal && c.nombreFiscal !== c.negocio ? c.nombreFiscal : '',
     telefono: c.telefono,
     direccion: c.direccion,
     ubicacion: c.ubicacion,
@@ -702,12 +732,13 @@ export const centriSalesCrearCliente = webMethod(
       const claves = await _clavesEtiquetas();
 
       // ── contactInfo (arrays directos, patrón wix-crm-backend) ──
+      // v1.3.0: el nombre del negocio es el Nombre del contacto; la Compañía
+      // (nombre fiscal) no se conoce en el alta. La persona no se guarda.
       const contactInfo = {
-        company: nNeg,
+        name: { first: nNeg },
         phones: [{ tag: 'MOBILE', phone: nTel }],
         labelKeys: [claves.prospecto]
       };
-      if (nPer)  contactInfo.name = { first: nPer };
       if (nMail) contactInfo.emails = [{ tag: 'MAIN', email: nMail }];
       if (nDir) {
         // Patrón lopdClientes v1.2.0: streetAddress.name + formatted.
