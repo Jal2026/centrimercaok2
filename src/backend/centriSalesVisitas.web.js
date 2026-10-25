@@ -1,8 +1,17 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Visitas (Wix Velo)
  * Archivo:  backend/centriSalesVisitas.web.js
- * VERSION:  1.1.0
+ * VERSION:  1.1.2
  * FECHA:    25 Octubre 2026
+ *
+ * v1.1.2 — 25 OCT 2026 · Resultados válidos = los de centriSalesLab 1.5.1
+ *   (fuera «oferta», entra «ventas»; nuevos negociacion, administrativa,
+ *   presentacion, cortesia). Un «oferta» que llegue se guarda como «ventas».
+ *
+ * v1.1.1 — 25 OCT 2026 · Los mensajes de acceso que ve el usuario ya no
+ *   nombran «Centri Sales» («No tienes acceso a esta aplicación.», «No estás
+ *   dado de alta en el equipo.»).
+ *   Mismo cambio en centriSalesClientes v1.3.2 (bloque copiado).
  *
  * v1.1.0 — 25 OCT 2026 · REABRIR UNA VISITA ENVIADA (petición de Jal tras la
  *   primera prueba): desde «Visitas de hoy» el comercial abre el informe ya
@@ -83,7 +92,7 @@ import { webMethod, Permissions } from 'wix-web-module';
 import wixData from 'wix-data';
 import { currentMember } from 'wix-members-backend';
 
-const VERSION = '1.1.0';
+const VERSION = '1.1.2';
 const TAG = `[CentriSalesVisitas][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -110,7 +119,7 @@ const ESTADO_LLEGADA = 'llegada';
 const ESTADO_ENVIADA = 'enviada';
 
 // Valores de TAXONOMIA_VISITA de centriSalesLab.web.js v1.2.0
-const RESULTADOS = ['pedido', 'oferta', 'seguimiento', 'incidencia', 'sin_interes', 'no_atendido', 'otro'];
+const RESULTADOS = ['pedido', 'ventas', 'negociacion', 'seguimiento', 'administrativa', 'incidencia', 'presentacion', 'cortesia', 'sin_interes', 'no_atendido', 'otro'];   // v1.1.2
 const INTERESES  = ['alto', 'medio', 'bajo', 'indeterminado'];
 
 const ZONA = 'Europe/Madrid';
@@ -119,7 +128,7 @@ const MAX_TRANSCRIPCION = 8000;   // el mismo tope que MAX_TEXTO del informe
 // servidor más de esto (relojes mal puestos); si no, cuenta la del servidor.
 const MARGEN_TS_MS = 2 * 60 * 60 * 1000;
 
-// ── Usuarios de la app — COPIA LITERAL de centriSalesClientes.web.js v1.2.1 ──
+// ── Usuarios de la app — COPIA LITERAL de centriSalesClientes.web.js v1.3.2 ──
 // ── Usuarios de la app (v1.1.0) ─────────────────────────────────────────────
 // Rol de miembro exigido (nombre o _id del rol). ⚠️ El rol tiene que llamarse
 // EXACTAMENTE así en los roles de miembro del site. No dejarlo vacío: vacío =
@@ -234,7 +243,7 @@ async function _reconocerComercial() {
       const tiene = roles.some(r => r && (r._id === ROL_AUTORIZADO || r.title === ROL_AUTORIZADO));
       if (!tiene) {
         console.warn(`${TAG} acceso DENEGADO a Centri Sales: memberId=${memberId} sin el rol "${ROL_AUTORIZADO}"`);   // [SALES]
-        return { ok: false, error: 'No tienes acceso a Centri Sales.' };   // [SALES]
+        return { ok: false, error: 'No tienes acceso a esta aplicación.' };   // [SALES] v1.1.1
       }
     } catch (e) {
       console.error(`${TAG} no se pudieron leer los roles — se deniega el acceso:`, e.message);
@@ -261,7 +270,7 @@ async function _reconocerComercial() {
 
     if (coinciden.length === 0) {
       console.warn(`${TAG} acceso DENEGADO: email=${email} no está en ${C_EQUIPO} (${filas.length} fichas)`);
-      return { ok: false, error: 'No estás dado de alta en el equipo de Centri Sales.' };
+      return { ok: false, error: 'No estás dado de alta en el equipo.' };   // v1.1.1
     }
     if (coinciden.length > 1) {
       // Email compartido (p. ej. el genérico de la empresa): no identifica a nadie.
@@ -380,6 +389,7 @@ function _llegadaAbierta(items, contactId) {
 /** Valida el informe que llega de la app (se guarda entero, sin inventar). */
 function _informeLimpio(informe) {
   const inf = (informe && typeof informe === 'object' && !Array.isArray(informe)) ? informe : {};
+  if (inf.resultado === 'oferta') inf.resultado = 'ventas';   // v1.1.2: valor antiguo
   const resultado = RESULTADOS.indexOf(_txt(inf.resultado)) >= 0 ? _txt(inf.resultado) : '';
   const interes   = INTERESES.indexOf(_txt(inf.interes)) >= 0 ? _txt(inf.interes) : '';
   return { informe: inf, resultado, interes };
