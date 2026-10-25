@@ -1,8 +1,20 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Banco de pruebas · Transcripción + informe (Wix Velo)
  * Archivo:  backend/centriSalesLab.web.js
- * VERSION:  1.3.1
+ * VERSION:  1.4.0
  * FECHA:    25 Octubre 2026
+ *
+ * v1.4.0 — 25 OCT 2026 · TICKET DE GASTO (pantallas del prototipo: «Añadir
+ *   ticket», «Ticket de gasto», «No se lee bien el ticket»). ADITIVO.
+ *     · NUEVO ticketCore({ imagen(base64), mime }): Claude (MODELO_INFORME,
+ *       con imagen) lee categoría, total, fecha y comercio. Si no se lee el
+ *       total con seguridad → { legible:false }. Si se lee, la foto se sube
+ *       al Media Manager (CARPETA_TICKETS) y se devuelve su fileUrl.
+ *     · Lo expone http-functions.js v1.0.5: POST /_functions/centriSalesTicket.
+ *     · Patrón de subida: mediaManager.upload() de la documentación de Velo
+ *       (wix-media-backend), con isPrivate:false como su ejemplo.
+ *     · Si falla la subida de la foto, la lectura del ticket no se pierde
+ *       (foto vacía y aviso en el log).
  *
  * v1.3.1 — 25 OCT 2026 · En la segunda prueba real el resumen puso al
  *   cliente («Cándido Ávila», nombre comercial del negocio) como una de las
@@ -148,9 +160,10 @@
 import { fetch } from 'wix-fetch';
 import { getSecret } from 'wix-secrets-backend';
 import crypto from 'crypto';
+import { mediaManager } from 'wix-media-backend';   // v1.4.0 — fotos de tickets
 
 // El TAG se deriva de VERSION (patrón de centriTTS.web.js).
-const VERSION = '1.3.1';
+const VERSION = '1.4.0';
 const V = `CENTRI_SALES_LAB v${VERSION}`;
 
 const STT_ENDPOINT   = 'https://speech.googleapis.com/v1/speech:recognize';
@@ -510,6 +523,104 @@ export async function informePruebaCore({ texto, cliente }) {
   } catch (err) {
     console.error(`[${V}] informe EXCEPTION:`, err.message || err);
     return { ok: false, error: 'Error técnico: ' + (err.message || 'desconocido'), reintentable: true };   // v1.2.0
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TICKET DE GASTO (v1.4.0) — foto del ticket → la IA la lee → Media Manager
+// ═══════════════════════════════════════════════════════════════════════════
+
+const MAX_TICKET_B64    = 4 * 1024 * 1024;   // ~3 MB de imagen (la app la reduce antes)
+const MIME_TICKET       = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_TOKENS_TICKET = 300;
+const CATEGORIAS_TICKET = ['combustible', 'parking', 'peaje', 'comida', 'alojamiento', 'otro'];
+const CARPETA_TICKETS   = '/centri-sales/tickets';
+
+function _systemTicket(hoy) {
+  return [
+    'Lees fotos de tickets y facturas simplificadas de los gastos de los comerciales de Centrimerca (combustible, parking, peajes, comidas, alojamiento).',
+    `Hoy es ${hoy.dia} (Europe/Madrid).`,
+    'Responde SOLO con JSON, sin texto alrededor ni bloques de código:',
+    '{"legible":true,"categoria":"","total_eur":null,"fecha":null,"comercio":""}',
+    '- legible: false si la foto no es un ticket o si no se lee el importe TOTAL con seguridad. En ese caso deja el resto vacío o null.',
+    `- categoria: una de ${CATEGORIAS_TICKET.join(', ')}.`,
+    '- total_eur: el importe TOTAL pagado, número con punto decimal (p. ej. 62.4). No lo inventes ni lo calcules: si no se lee, legible false.',
+    '- fecha: la del ticket en AAAA-MM-DD. Si no se lee, null.',
+    '- comercio: el nombre del establecimiento tal como aparece, máximo 60 caracteres. Si no se lee, "".'
+  ].join('\n');
+}
+
+export async function ticketCore({ imagen, mime }) {
+  const b64 = String(imagen || '');
+  const tipo = String(mime || '').toLowerCase();
+  console.log(`[${V}] ticket IN b64=${b64.length} mime=${tipo}`);
+
+  try {
+    if (!b64) return { ok: false, error: 'Falta la foto del ticket.' };
+    if (b64.length > MAX_TICKET_B64) return { ok: false, error: 'La foto es demasiado grande.' };
+    if (MIME_TICKET.indexOf(tipo) < 0) return { ok: false, error: 'Formato de foto no admitido.' };
+
+    let apiKey;
+    try { apiKey = await getSecret(SECRET_ANTHROPIC); }
+    catch (e) { return { ok: false, error: `Configuración incompleta: falta el secret ${SECRET_ANTHROPIC}.` }; }
+
+    const user = [
+      { type: 'image', source: { type: 'base64', media_type: tipo, data: b64 } },
+      { type: 'text', text: 'Lee este ticket.' }
+    ];
+
+    const t0 = Date.now();
+    const res = await _llamarModelo(apiKey, MODELO_INFORME, _systemTicket(_hoyMadrid()), user, MAX_TOKENS_TICKET);
+    const timeMs = Date.now() - t0;
+
+    let r;
+    try {
+      r = JSON.parse(res.texto.replace(/```json|```/g, '').trim());
+    } catch (e) {
+      console.error(`[${V}] ticket: respuesta no JSON: ${res.texto.slice(0, 200)}`);
+      return { ok: false, error: 'La IA no devolvió una lectura válida.', timeMs, reintentable: true };
+    }
+
+    // «18,5» → 18.5 (coma decimal sin punto de millares)
+    const bruto = String(r && r.total_eur != null ? r.total_eur : '');
+    const total = Number(/^\d+,\d{1,2}$/.test(bruto) ? bruto.replace(',', '.') : bruto);
+    const legible = !!(r && r.legible === true && isFinite(total) && total > 0 && total < 100000);
+    console.log(`[${V}] ticket OUT ${timeMs}ms legible=${legible} in=${res.entrada} out=${res.salida}`);
+    if (!legible) return { ok: true, ticket: { legible: false }, timeMs };
+
+    const categoria = CATEGORIAS_TICKET.indexOf(r.categoria) >= 0 ? r.categoria : 'otro';
+    const fecha = /^\d{4}-\d{2}-\d{2}$/.test(String(r.fecha || '')) ? r.fecha : null;
+    const comercio = _texto(r.comercio, 60);
+
+    // La foto se guarda solo si se ha leído (patrón de la documentación de
+    // mediaManager.upload). Un fallo aquí no pierde la lectura.
+    let foto = '';
+    try {
+      const ext = tipo === 'image/png' ? 'png' : (tipo === 'image/webp' ? 'webp' : 'jpg');
+      const subida = await mediaManager.upload(
+        CARPETA_TICKETS,
+        Buffer.from(b64, 'base64'),
+        `ticket-${Date.now()}.${ext}`,
+        {
+          mediaOptions: { mimeType: tipo, mediaType: 'image' },
+          metadataOptions: { isPrivate: false, isVisitorUpload: false }
+        }
+      );
+      foto = (subida && subida.fileUrl) || '';
+    } catch (e) {
+      console.error(`[${V}] ticket: no se pudo guardar la foto:`, e.message || e);
+    }
+
+    return {
+      ok: true,
+      ticket: { legible: true, categoria, total_eur: Math.round(total * 100) / 100, fecha, comercio, foto },
+      modelo: MODELO_INFORME,
+      timeMs
+    };
+
+  } catch (err) {
+    console.error(`[${V}] ticket EXCEPTION:`, err.message || err);
+    return { ok: false, error: 'Error técnico: ' + (err.message || 'desconocido'), reintentable: true };
   }
 }
 
