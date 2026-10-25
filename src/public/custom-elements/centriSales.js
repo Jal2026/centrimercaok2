@@ -2,8 +2,16 @@
  * CENTRIMERCA — CENTRI SALES · App de los comerciales (Wix Custom Element)
  * Archivo:  public/custom-elements/centriSales.js
  * Tag name: centri-sales
- * VERSION:  1.0.5 (BETA)
+ * VERSION:  1.0.6 (BETA)
  * FECHA:    25 Octubre 2026
+ *
+ * v1.0.6 — 25 OCT 2026 · «Añadir a mi calendario»: con la fecha de la
+ *   próxima acción fijada, un botón la lleva al calendario del móvil.
+ *   Android: abre Google Calendar con el evento relleno (enlace
+ *   calendar.google.com/calendar/render?action=TEMPLATE). iPhone y resto:
+ *   descarga un archivo .ics, que abre el Calendario. Evento de día
+ *   completo: «Cliente · próxima acción», con el resumen como nota.
+ *   El recuadro FECHA sigue siendo para fijar o cambiar la fecha.
  *
  * v1.0.5 — 25 OCT 2026 · Prueba en móvil de Jal:
  *   1. TICKET DE GASTO (pantallas del prototipo): «Añadir ticket» junto a
@@ -114,7 +122,7 @@
     return;
   }
 
-  const VERSION = '1.0.5';
+  const VERSION = '1.0.6';
   const TAG = `[CENTRI SALES v${VERSION}]`;
 
   // ── Servidor ──
@@ -1208,6 +1216,56 @@
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // CALENDARIO DEL MÓVIL (v1.0.6)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    _anadirCalendario() {
+      const inf = this._informe || {};
+      const pa = inf.proxima_accion || {};
+      if (!pa.fecha || !/^\d{4}-\d{2}-\d{2}$/.test(pa.fecha)) { this._toast('Primero elige la fecha.'); return; }
+      const c = this._cliente || {};
+      const titulo = `${c.negocio || c.persona || 'Cliente'} · ${pa.descripcion || 'Próxima acción'}`;
+      const nota = String(inf.resumen || '');
+      const ini = pa.fecha.replace(/-/g, '');
+      const d = new Date(pa.fecha + 'T12:00:00');
+      d.setDate(d.getDate() + 1);
+      const fin = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+      if (IS_ANDROID) {
+        const url = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+          + '&text=' + encodeURIComponent(titulo)
+          + '&dates=' + ini + '/' + fin
+          + '&details=' + encodeURIComponent(nota);
+        window.open(url, '_blank', 'noopener');
+        return;
+      }
+      const esc = (t) => String(t).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+      const ahora = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+      const ics = [
+        'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Centrimerca//Visitas//ES', 'CALSCALE:GREGORIAN',
+        'BEGIN:VEVENT',
+        `UID:${nuevoId()}@centrimerca`,
+        `DTSTAMP:${ahora}`,
+        `DTSTART;VALUE=DATE:${ini}`,
+        `DTEND;VALUE=DATE:${fin}`,
+        `SUMMARY:${esc(titulo)}`,
+        `DESCRIPTION:${esc(nota)}`,
+        'END:VEVENT', 'END:VCALENDAR'
+      ].join('\r\n');
+      try {
+        const url = URL.createObjectURL(new Blob([ics], { type: 'text/calendar;charset=utf-8' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'proxima-accion.ics';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+      } catch (e) {
+        this._toast('No se pudo crear el evento.');
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // TICKET DE GASTO (v1.0.5)
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -1447,6 +1505,7 @@
           case 'corregir': this._corregir(); break;
           case 'ticket': this._abrirCamaraTicket(); break;               // v1.0.5
           case 'guardarTicket': this._guardarTicket(); break;
+          case 'calendario': this._anadirCalendario(); break;               // v1.0.6
           case 'volverInforme': this._ticketLeido = null; this._go('report'); break;
           case 'enviar': this._enviar(); break;
           default: break;
@@ -1879,7 +1938,7 @@
             ${(productos || objeciones || bloqueAlertas) ? `<div class="caja g12">${productos}${objeciones}${bloqueAlertas}</div>` : ''}
             <div class="caja fila-pa">
               <label class="cal"><span class="cal-h">FECHA</span>${cal}<input id="fFecha" class="cal-in" type="date" value="${this._escape(pa.fecha || '')}" aria-label="Fecha de la próxima acción"></label>
-              <span class="pa"><span class="t-gris16">Próxima acción</span><span class="pa-t">${this._escape(pa.descripcion || 'No has dicho ninguna')}</span>${pa.responsable ? `<span class="pa-r"><span class="i16">${ico('user')}</span>${this._escape(etiqueta('responsable', pa.responsable))}</span>` : ''}</span>
+              <span class="pa"><span class="t-gris16">Próxima acción</span><span class="pa-t">${this._escape(pa.descripcion || 'No has dicho ninguna')}</span>${pa.responsable ? `<span class="pa-r"><span class="i16">${ico('user')}</span>${this._escape(etiqueta('responsable', pa.responsable))}</span>` : ''}${pa.fecha ? `<button class="a-cal" data-accion="calendario"><span class="i18">${ico('clock')}</span>Añadir a mi calendario</button>` : ''}</span>
             </div>
             ${sg.descripcion ? `<div class="caja sug">
               <div class="sug-h"><span class="i22">${ico('sparkles')}</span>Sugerencia de la IA</div>
@@ -2178,6 +2237,7 @@
   .pa { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .pa-t { font-size: 18px; font-weight: 700; color: ${C.verdeNeg}; line-height: 1.25; }
   .pa-r { font-size: 16px; color: ${C.verdeOsc}; display: flex; align-items: center; gap: 6px; }
+  .a-cal { margin-top: 8px; align-self: flex-start; min-height: 44px; padding: 0 14px; border-radius: 999px; border: 2px solid ${C.verdeAz}; color: ${C.verdeAz}; font-size: 16px; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; }
   .sug { border: 2px dashed ${C.verdeAz}; padding: 16px 18px; gap: 8px; }
   .sug-h { display: flex; align-items: center; gap: 8px; color: ${C.verdeAz}; font-size: 15px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
   .sug-t { font-size: 17px; line-height: 1.45; color: ${C.tinta}; }
