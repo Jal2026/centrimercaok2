@@ -1,8 +1,20 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Banco de pruebas · Transcripción + informe (Wix Velo)
  * Archivo:  backend/centriSalesLab.web.js
- * VERSION:  1.2.0
+ * VERSION:  1.3.0
  * FECHA:    25 Octubre 2026
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * CAMBIOS v1.2.0 → v1.3.0 — primera prueba real de la beta (Jal, 25-oct)
+ * ───────────────────────────────────────────────────────────────────────────
+ *   1. RESUMEN: de 35 a 90 palabras como máximo. Con 35 se perdía quién
+ *      estuvo en la visita (los dos hermanos y el padre) y cómo está el
+ *      cliente (contentos) en un reporte de más de un minuto. Ahora el
+ *      resumen debe recoger: quién estuvo, cómo está el cliente, qué se
+ *      habló y en qué quedó. Tope de texto 600 → 900 caracteres y
+ *      MAX_TOKENS_INFORME 900 → 1200.
+ *   2. DUDAS: solo preguntas que se contestan con Sí o No (la app solo
+ *      ofrece esos dos botones). Salió «¿Qué volumen anual estiman…?».
  *
  * ───────────────────────────────────────────────────────────────────────────
  * CAMBIOS v1.1.0 → v1.2.0 — INFORME SEGÚN LA UI v1 + REINTENTOS
@@ -132,7 +144,7 @@ import { getSecret } from 'wix-secrets-backend';
 import crypto from 'crypto';
 
 // El TAG se deriva de VERSION (patrón de centriTTS.web.js).
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const V = `CENTRI_SALES_LAB v${VERSION}`;
 
 const STT_ENDPOINT   = 'https://speech.googleapis.com/v1/speech:recognize';
@@ -275,7 +287,7 @@ async function _recognize(accessToken, audio, encoding, modelo) {
 // Mismo modelo y mismo secret que CENTRI (centriLogic.web.js v1.0.9).
 const MODELO_INFORME     = 'claude-haiku-4-5';
 const SECRET_ANTHROPIC   = 'CENTRIMERCA';
-const MAX_TOKENS_INFORME = 900;
+const MAX_TOKENS_INFORME = 1200;   // v1.3.0: 900 → 1200 (resumen más largo)
 const MAX_TEXTO          = 8000;    // caracteres de transcripción (~10 min hablando)
 const ZONA               = 'Europe/Madrid';
 
@@ -333,8 +345,9 @@ function _systemInforme(hoy) {
     'REGLAS:',
     '- Solo lo que dice el reporte. No inventes importes, cantidades, fechas, productos ni acuerdos. Si algo no está, déjalo vacío o null.',
     '- La transcripción viene de voz y puede tener errores. Corrige términos del sector solo cuando sea evidente por el contexto (p. ej. "rappers" → rappel, "palet" → palé). Nunca corrijas nombres de clientes ni de personas.',
-    // v1.2.0: 60 → 35 palabras
-    '- Quita muletillas y repeticiones ("bueno", "pues", "o sea"). El resumen va en tercera persona, neutro, máximo 35 palabras. Prioriza hechos, peticiones y condiciones del cliente.',
+    // v1.3.0: 35 → 90 palabras y contenido obligatorio (prueba real: se perdían asistentes y ánimo del cliente)
+    '- Quita muletillas y repeticiones ("bueno", "pues", "o sea"). El resumen va en tercera persona, neutro, máximo 90 palabras, en frases cortas.',
+    '- El resumen recoge, si el reporte lo dice: quién estuvo en la visita (personas y su relación, p. ej. «los dos hermanos y el padre»), cómo está el cliente (contento, molesto, preocupado…) y por qué, qué se habló y en qué quedó. Después, los hechos, peticiones y condiciones del cliente. No omitas a las personas ni el ánimo del cliente por ahorrar palabras.',
     // v1.2.0: fallos de la prueba real (negación mal leída y condición perdida)
     '- Respeta el sentido exacto de cada hecho y mantén las negaciones: «no le servimos los sábados» significa que no se le sirve ese día; no lo conviertas en un retraso ni en una incidencia de entrega.',
     '- Conserva las condiciones y salvedades que cambian el sentido («aunque», «solo si», «a cambio de», «sin haber llegado a»). P. ej., «acepta el precio solo si se le sirve antes de las 7» no es «acepta el precio». Van en el resumen o en la descripción que corresponda.',
@@ -342,7 +355,9 @@ function _systemInforme(hoy) {
     '- Lo que expresa el CLIENTE (quejas, enfado, satisfacción) sí cuenta para interes, objeciones y alertas.',
     '- importe_eur: número solo si el reporte da una cifra en euros. Un porcentaje de descuento va en la descripción, no en importe_eur.',
     '- productos: los que se nombran, en minúscula y singular genérico (p. ej. "tomate rama", "pera"). Máximo 10.',
+    // v1.3.0: la app solo ofrece Sí / No
     '- dudas: hasta 3 preguntas cortas para que el comercial confirme lo que no queda claro o lo que pudo transcribirse mal. Si todo está claro, lista vacía.',
+    '- Cada duda se contesta SOLO con Sí o No. Nunca preguntes «qué», «cuánto», «cuándo», «cuál» ni «cómo». Si falta un dato, pregunta si lo que entendiste es correcto (p. ej. «¿Son 3 palés de naranja?») o no lo preguntes.',
     '- Si el reporte menciona un cliente distinto del de la visita, añádelo como duda.',
     // v1.2.0: próxima acción (lo que dice el comercial) y sugerencia de la IA, separadas
     '- proxima_accion: SOLO la que el comercial dice expresamente (lo que va a hacer, lo acordado con el cliente o lo que pide a otro departamento). Si no dice ninguna: descripcion "", fecha null y responsable "". No la deduzcas ni la completes.',
@@ -359,7 +374,7 @@ function _texto(v, max) {
 function _validarInforme(r) {
   const out = {};
   const invalidos = [];
-  out.resumen = _texto(r.resumen, 600);
+  out.resumen = _texto(r.resumen, 900);   // v1.3.0: 600 → 900
 
   ['resultado', 'interes'].forEach((campo) => {
     const v = String(r[campo] || '').trim();
