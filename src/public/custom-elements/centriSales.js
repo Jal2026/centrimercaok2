@@ -2,8 +2,19 @@
  * CENTRIMERCA — CENTRI SALES · App de los comerciales (Wix Custom Element)
  * Archivo:  public/custom-elements/centriSales.js
  * Tag name: centri-sales
- * VERSION:  1.0.3 (BETA)
+ * VERSION:  1.0.4 (BETA)
  * FECHA:    25 Octubre 2026
+ *
+ * v1.0.4 — 25 OCT 2026 · Prueba real de Jal:
+ *   1. ENVIAR INFORME: al pulsar en la parte de arriba del botón se abría
+ *      «Corregir». La barra de enviar queda por encima de todo
+ *      (position + z-index) y hay aire debajo de «Corregir».
+ *   2. REABRIR UNA VISITA ENVIADA: en «Visitas de hoy», tocar una visita
+ *      enviada abre su informe (método leerVisita, centriSalesVisitas
+ *      v1.1.0). Se puede cambiar el resultado, responder «Para confirmar»
+ *      o grabar una corrección y volver a enviar: se actualiza la misma
+ *      visita. Salir sin cambiar nada no deja borrador.
+ *   3. Ubicación sin precisión conocida: «ubicación guardada» (sin «±? m»).
  *
  * v1.0.3 — 25 OCT 2026 · Tarjetas de cliente con los DOS nombres: el
  *   comercial de título y el fiscal debajo (cuando es distinto), luego la
@@ -87,7 +98,7 @@
     return;
   }
 
-  const VERSION = '1.0.3';
+  const VERSION = '1.0.4';
   const TAG = `[CENTRI SALES v${VERSION}]`;
 
   // ── Servidor ──
@@ -342,6 +353,8 @@
       this._paso = 0;
       this._resOpen = false;
       this._tick = null;
+      this._reabierta = false;   // v1.0.4: informe de una visita ya enviada
+      this._cambiada = false;
     }
 
     connectedCallback() {
@@ -430,6 +443,8 @@
       // También al salir de «Corregir» sin grabar: el informe anterior sigue valiendo.
       const corrigiendo = this._screen === 'visit' && !!this._informe;
       if (!this._cliente || !(this._screen === 'report' || this._screen === 'error' || corrigiendo)) return;
+      // v1.0.4: una visita ya enviada que se abre y se cierra sin tocar no es un borrador
+      if (this._reabierta && !this._cambiada) return;
       this._borrador = {
         pantalla: corrigiendo ? 'report' : this._screen,
         cliente: this._cliente, visitaId: this._visitaId, llegadaTs: this._llegadaTs,
@@ -461,6 +476,8 @@
       this._informe = null;
       this._grabacion = null;
       this._resOpen = false;
+      this._reabierta = false;   // v1.0.4
+      this._cambiada = false;
       this._go('home');
       this._cargarVisitas();
     }
@@ -564,8 +581,35 @@
         this._go('visit');
         return;
       }
+      if (v && v.estado === 'enviada') { this._reabrirVisita(v.id); return; }   // v1.0.4
       const p = leerPendientes().find((x) => x.envioId === id);
       if (p) this._enviarPendientes(true);
+    }
+
+    /** v1.0.4 — Abre el informe de una visita ya enviada para revisarlo o corregirlo. */
+    async _reabrirVisita(id) {
+      this._go('cargando');
+      const r = await this._rpc('leerVisita', { id });
+      const v = r && r.ok && r.visita;
+      if (!v || !v.informe) {
+        this._go('home');
+        this._toast((r && r.error && r.error.message) || 'No se pudo abrir la visita.');
+        return;
+      }
+      this._cliente = { contactId: v.contactId, negocio: v.cliente, persona: '', telefono: '', direccion: '', ubicacion: null, tipo: '' };
+      this._visitaId = v.id;
+      this._llegadaTs = v.llegada || null;
+      this._texto = v.transcripcion || '';
+      this._textoPrevio = '';
+      const inf = v.informe;
+      if (!Array.isArray(inf.confirmaciones)) inf.confirmaciones = (inf.dudas || []).map((q) => ({ pregunta: q, respuesta: '' }));
+      this._informe = inf;
+      const coord = (typeof v.reporteLat === 'number' && typeof v.reporteLon === 'number') ? { lat: v.reporteLat, lon: v.reporteLon, precision: null } : null;
+      this._grabacion = { segs: [], res: [], pendientes: [], ms: (v.segundosAudio || 0) * 1000, coord, informeFallo: false };
+      this._reabierta = true;
+      this._cambiada = false;
+      this._resOpen = false;
+      this._go('report');
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -868,6 +912,7 @@
       G.informeFallo = false;
       this._informe = Object.assign({}, r.informe, { confirmaciones: (r.informe.dudas || []).map((q) => ({ pregunta: q, respuesta: '' })) });
       this._resOpen = false;
+      this._cambiada = true;   // v1.0.4
       this._paso = 3;
       this._go('report');
     }
@@ -1212,11 +1257,11 @@
           case 'terminar': this._terminarGrabacion(); break;
           case 'reintentar': this._reintentar(); break;
           case 'cambiarRes': this._resOpen = !this._resOpen; this._pintar(); break;
-          case 'elegirRes': if (this._informe) { this._informe.resultado = arg; this._resOpen = false; this._pintar(); } break;
+          case 'elegirRes': if (this._informe) { this._informe.resultado = arg; this._resOpen = false; this._cambiada = true; this._pintar(); } break;
           case 'confirmar': {
             const [i, v] = String(arg).split(':');
             const cf = this._informe && this._informe.confirmaciones && this._informe.confirmaciones[Number(i)];
-            if (cf) { cf.respuesta = cf.respuesta === v ? '' : v; this._pintar(); }
+            if (cf) { cf.respuesta = cf.respuesta === v ? '' : v; this._cambiada = true; this._pintar(); }
             break;
           }
           case 'corregir': this._corregir(); break;
@@ -1299,7 +1344,8 @@
       const lista = borr.concat(pend, this._visitas.map((v) => Object.assign({}, v, { estado: v.estado === 'enviada' && v.conDudas ? 'dudas' : v.estado })));
       const tarjetas = lista.map((v) => {
         const s = ST[v.estado] || ST.enviada;
-        const abre = v.estado === 'llegada' || v.estado === 'pendiente' || v.estado === 'borrador';
+        // v1.0.4: también las enviadas (y con dudas): se abre su informe
+        const abre = true;
         return `<button class="tarjeta" ${abre ? `data-accion="abrirVisita" data-arg="${this._escape(v.id)}"` : 'tabindex="-1"'}>
           <span class="t-ico ${s.cls}">${ico(s.icon)}</span>
           <span class="t-cuerpo"><span class="t-nom">${this._escape(v.cliente || '—')}</span><span class="t-est ${s.cls}-t">${this._escape(v.hora || '')} · ${s.st}</span></span>
@@ -1561,7 +1607,7 @@
         const d = distanciaM(yo, cli);
         partes.push(d <= MARGEN_CLIENTE_M ? 'en el cliente ✓' : `a ${textoDistancia(d)} del cliente`);
       } else if (yo) {
-        partes.push(`ubicación guardada · ±${yo.precision || '?'} m`);
+        partes.push(yo.precision ? `ubicación guardada · ±${yo.precision} m` : 'ubicación guardada');
       } else {
         partes.push('sin ubicación');
       }
@@ -1638,6 +1684,7 @@
               <span class="loc-t"><span class="loc-l">${this._escape(this._ubicacionTexto())}</span>${mapa}</span>
             </div>
             <button class="btn btn-borde btn-72" data-accion="corregir"><span class="i24 fucsia">${ico('mic')}</span>Corregir</button>
+            <div class="aire"></div>
           </div>
         </div>
         <div class="barra-enviar"><button class="enviar" id="btnEnviar" data-accion="enviar">ENVIAR INFORME</button></div>
@@ -1933,7 +1980,8 @@
   .loc-t { flex: 1; display: flex; flex-direction: column; }
   .loc-l { font-size: 17px; font-weight: 600; color: ${C.verdeOsc}; }
   .loc-t a { font-size: 16px; font-weight: 600; }
-  .barra-enviar { flex: none; padding: 12px 16px calc(26px + env(safe-area-inset-bottom)); background: ${C.blanco}; border-top: 1px solid ${C.linea}; }
+  .barra-enviar { flex: none; position: relative; z-index: 5; padding: 12px 16px calc(26px + env(safe-area-inset-bottom)); background: ${C.blanco}; border-top: 1px solid ${C.linea}; }
+  .aire { height: 28px; flex: none; }
   .enviar { width: 100%; height: 96px; border-radius: 28px; background: ${C.fucsia}; color: ${C.blanco}; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; letter-spacing: .04em; box-shadow: 0 14px 28px -14px rgba(232,10,77,.7); transition: transform .1s; }
   .enviar:disabled { opacity: .7; }
 
