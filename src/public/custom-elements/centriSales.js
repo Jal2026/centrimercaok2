@@ -2,8 +2,16 @@
  * CENTRIMERCA — CENTRI SALES · App de los comerciales (Wix Custom Element)
  * Archivo:  public/custom-elements/centriSales.js
  * Tag name: centri-sales
- * VERSION:  1.0.10 (BETA)
+ * VERSION:  1.0.11 (BETA)
  * FECHA:    26 Octubre 2026
+ *
+ * v1.0.11 — 26 OCT 2026 · VISITAS DE OTRO DÍA (Jal): icono de calendario al
+ *   lado de «Visitas de hoy». Abre el selector de fecha del móvil (hasta hoy)
+ *   y la lista pasa a ese día («Visitas del día»). Debajo del nombre sale el
+ *   día elegido, no el de hoy. Las de otro día se abren igual (completar o
+ *   reabrir). Para volver: elegir hoy. «Nueva visita» y «He llegado» vuelven
+ *   solos a hoy. Borrador y pendientes de envío solo salen en hoy.
+ *   Requiere centriSalesVisitas v1.1.3 (visitasHoy con { dia }).
  *
  * v1.0.10 — 26 OCT 2026 · Único cambio: «Cambiar» del resultado sube a la
  *   línea de «Resultado» y es más pequeño. Con «Presentación» el botón
@@ -235,6 +243,7 @@
     clock: [cc(12, 12, 10), 'M12 6v6l4 2'],
     help: [cc(12, 12, 10), 'M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3', 'M12 17h.01'],
     info: [cc(12, 12, 10), 'M12 16v-4', 'M12 8h.01'],   // v1.0.9 — Lucide «info»
+    calendar: ['M8 2v4', 'M16 2v4', 'M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z', 'M3 10h18'],   // v1.0.11 — Lucide «calendar»
     chev: ['m9 18 6-6-6-6'],
     back: ['m12 19-7-7 7-7', 'M19 12H5'],
     mic: ['M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z', 'M19 10v2a7 7 0 0 1-14 0v-2', 'M12 19v3'],
@@ -380,6 +389,17 @@
     catch (_) { return false; }
   }
   // v1.0.9 — «2026-12-15» → «15 de diciembre»
+  // v1.0.11 — AAAA-MM-DD de hoy (hora del móvil) y «2026-10-22» → «Jueves, 22 de octubre»
+  function hoyIso() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  function diaLargo(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+    if (!m) return '';
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return `${DIAS[d.getDay()]}, ${d.getDate()} de ${MESES[d.getMonth()]}`;
+  }
   function diaTexto(iso) {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
     return m ? `${Number(m[3])} de ${MESES[Number(m[2]) - 1]}` : '';
@@ -415,6 +435,7 @@
       this._errorAcceso = '';
       this._rpcPend = new Map();
       this._visitas = [];
+      this._dia = '';                // v1.0.11: día de la lista (AAAA-MM-DD); vacío = hoy
       this._avisos = [];             // v1.0.9: avisos de la empresa
       this._avisosTs = 0;            // v1.0.9: última petición
       this._toastTimer = null;
@@ -611,7 +632,9 @@
     // ═══════════════════════════════════════════════════════════════════════
 
     async _cargarVisitas() {
-      const r = await this._rpc('visitasHoy', {});
+      const dia = this._dia;   // v1.0.11
+      const r = await this._rpc('visitasHoy', dia ? { dia } : {});
+      if (dia !== this._dia) return;   // v1.0.11: se cambió de día mientras llegaba
       if (r && r.ok) {
         this._visitas = Array.isArray(r.visitas) ? r.visitas : [];
         if (this._screen === 'home' || this._screen === 'arrived') this._pintar();
@@ -647,11 +670,24 @@
       this._cargarAvisos(true);
     }
 
-    _nuevaVisita() { this._modo = 'nueva'; this._prepararBusqueda(); }
+    // v1.0.11 — cambiar el día de la lista
+    _elegirDia(valor) {
+      const hoy = hoyIso();
+      const v = /^\d{4}-\d{2}-\d{2}$/.test(String(valor || '')) ? valor : '';
+      const nuevo = (!v || v >= hoy) ? '' : v;
+      if (nuevo === this._dia) return;
+      this._dia = nuevo;
+      this._visitas = [];
+      this._pintar();
+      this._cargarVisitas();
+    }
+
+    _nuevaVisita() { this._dia = ''; this._modo = 'nueva'; this._prepararBusqueda(); }   // v1.0.11: vuelve a hoy
 
     _heLlegado() {
       // La hora y la ubicación se guardan YA; el cliente se elige después.
       this._modo = 'llegada';
+      this._dia = '';   // v1.0.11: vuelve a hoy
       this._llegadaTs = Date.now();
       this._llegadaCoord = null;
       this._llegadaGeo = this._ubicar().then((p) => { if (p) this._llegadaCoord = { lat: p.lat, lon: p.lon }; return p; });
@@ -1537,7 +1573,7 @@
       const r = this.shadowRoot;
       r.addEventListener('click', (ev) => {
         // v1.0.5 — calendario de la próxima acción: abrir el selector del sistema
-        if (ev.target && ev.target.id === 'fFecha') {
+        if (ev.target && (ev.target.id === 'fFecha' || ev.target.id === 'fDia')) {   // v1.0.11: fDia
           try { if (typeof ev.target.showPicker === 'function') ev.target.showPicker(); } catch (_) {}
           return;
         }
@@ -1598,6 +1634,8 @@
           const f = t.files && t.files[0];
           t.value = '';
           if (f) this._leerTicket(f);
+        } else if (t.id === 'fDia') {   // v1.0.11
+          this._elegirDia(t.value);
         } else if (t.id === 'fFecha' && this._informe) {
           const pa = Object.assign({}, this._informe.proxima_accion || {});
           pa.fecha = t.value || null;
@@ -1682,9 +1720,9 @@
         pendiente:{ st: 'Pendiente de enviar', icon: 'clock', cls: 'st-pend' },
         borrador: { st: 'Sin enviar · toca para seguir', icon: 'redo', cls: 'st-pin' }
       };
-      const b = this._borrador;
+      const b = this._dia ? null : this._borrador;   // v1.0.11: borrador y pendientes, solo en hoy
       const borr = b ? [{ id: '__borrador', cliente: b.cliente.negocio || b.cliente.persona, hora: b.hora, estado: 'borrador' }] : [];
-      const pend = leerPendientes().map((p) => ({ id: p.envioId, cliente: p.cliente, hora: p.hora, estado: 'pendiente' }));
+      const pend = (this._dia ? [] : leerPendientes()).map((p) => ({ id: p.envioId, cliente: p.cliente, hora: p.hora, estado: 'pendiente' }));
       const lista = borr.concat(pend, this._visitas.map((v) => Object.assign({}, v, { estado: v.estado === 'enviada' && v.conDudas ? 'dudas' : v.estado })));
       const tarjetas = lista.map((v) => {
         const s = ST[v.estado] || ST.enviada;
@@ -1695,7 +1733,7 @@
           <span class="t-cuerpo"><span class="t-nom">${this._escape(v.cliente || '—')}</span><span class="t-est ${s.cls}-t">${this._escape(v.hora || '')} · ${s.st}</span></span>
           <span class="t-chev">${abre ? ico('chev') : ''}</span>
         </button>`;
-      }).join('') || '<div class="vacio">Aún no hay visitas hoy.</div>';
+      }).join('') || `<div class="vacio">${this._dia ? 'No hay visitas ese día.' : 'Aún no hay visitas hoy.'}</div>`;
 
       let hoja = '';
       if (conHoja) {
@@ -1714,10 +1752,10 @@
       }
 
       return `<div class="scroll home">
-        <div class="yo">${foto}<div class="yo-t"><div class="yo-nom">${this._escape(c.nombre || '')}</div><div class="yo-fecha">${this._escape(hoyTexto())}</div></div><button class="info-b" data-accion="avisos" aria-label="Avisos">${ico('info')}${this._avisosSinVer() ? '<span class="info-dot"></span>' : ''}</button></div>
+        <div class="yo">${foto}<div class="yo-t"><div class="yo-nom">${this._escape(c.nombre || '')}</div><div class="yo-fecha">${this._escape(this._dia ? diaLargo(this._dia) : hoyTexto())}</div></div><button class="info-b" data-accion="avisos" aria-label="Avisos">${ico('info')}${this._avisosSinVer() ? '<span class="info-dot"></span>' : ''}</button></div>
         <button class="nueva" data-accion="nuevaVisita"><span class="nueva-ico"><span class="i36">${ico('plus')}</span></span><span>Nueva visita</span></button>
         <button class="llegue" data-accion="heLlegado"><span class="i32">${ico('pin')}</span><span>He llegado</span></button>
-        <div class="seccion">Visitas de hoy</div>
+        <div class="seccion-fila"><div class="seccion">${this._dia ? 'Visitas del día' : 'Visitas de hoy'}</div><label class="dia-b" aria-label="Elegir día">${ico('calendar')}<input id="fDia" class="cal-in" type="date" max="${hoyIso()}" value="${this._dia || hoyIso()}"></label></div>
         <div class="lista">${tarjetas}</div>
       </div>${hoja}`;
     }
@@ -2195,6 +2233,11 @@
   .aviso { border-radius: 20px; background: ${C.blanco}; border: 1px solid ${C.linea}; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
   .aviso-f { font-size: 15px; font-weight: 600; color: ${C.gris}; }
   .aviso-m { font-size: 18px; line-height: 1.45; color: ${C.tinta}; white-space: pre-line; overflow-wrap: anywhere; }
+  /* v1.0.11 — día de la lista */
+  .seccion-fila { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+  .seccion-fila .seccion { margin-top: 0; }
+  .dia-b { position: relative; width: 44px; height: 44px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: ${C.verdeAz}; cursor: pointer; }
+  .dia-b svg { width: 28px; height: 28px; }
   .seccion { font-size: 18px; font-weight: 700; color: ${C.verdeNeg}; margin-top: 6px; }
   .lista { display: flex; flex-direction: column; gap: 10px; }
   .tarjeta { min-height: 76px; border-radius: 20px; background: ${C.blanco}; border: 1px solid ${C.linea}; display: flex; align-items: center; gap: 14px; padding: 10px 14px; width: 100%; flex: none; }
