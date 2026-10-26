@@ -2,8 +2,16 @@
  * CENTRIMERCA — CENTRI SALES · App de los comerciales (Wix Custom Element)
  * Archivo:  public/custom-elements/centriSales.js
  * Tag name: centri-sales
- * VERSION:  1.0.8 (BETA)
- * FECHA:    25 Octubre 2026
+ * VERSION:  1.0.9 (BETA)
+ * FECHA:    26 Octubre 2026
+ *
+ * v1.0.9 — 26 OCT 2026 · AVISOS DE LA EMPRESA (Jal): «i» en un círculo arriba
+ *   a la derecha del inicio. Punto fucsia si hay avisos sin ver; al tocarla,
+ *   pantalla «Avisos» con la lista (fecha y mensaje) y se marcan como vistos.
+ *   Lo visto se recuerda en el móvil (localStorage); la app no escribe nada.
+ *   Método nuevo `avisos` (backend/centriSalesAvisos.web.js v1.0.0 +
+ *   CentriSales.page.js v1.0.3). Se pide al abrir la app y al volver al
+ *   inicio (como mucho cada 2 min) y al abrir «Avisos».
  *
  * v1.0.8 — 25 OCT 2026 · (Parte de 1.0.6; la 1.0.7 «motivo» se descarta.)
  *   Resultados de centriSalesLab 1.5.1: fuera «Oferta», entra «Ventas»;
@@ -167,6 +175,10 @@
   // ── Pendientes de enviar, guardados en el móvil ──
   const LS_PENDIENTES = 'centriSales.pendientes';
 
+  // ── v1.0.9 — Avisos de la empresa ──
+  const LS_AVISOS_VISTOS = 'centriSales.avisosVistos';
+  const AVISOS_REFRESCO_MS = 2 * 60 * 1000;   // al volver al inicio, como mucho cada 2 min
+
   const UA = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
   const IS_ANDROID = /Android/.test(UA);
 
@@ -218,6 +230,7 @@
     checkC: [cc(12, 12, 10), 'm9 12 2 2 4-4'],
     clock: [cc(12, 12, 10), 'M12 6v6l4 2'],
     help: [cc(12, 12, 10), 'M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3', 'M12 17h.01'],
+    info: [cc(12, 12, 10), 'M12 16v-4', 'M12 8h.01'],   // v1.0.9 — Lucide «info»
     chev: ['m9 18 6-6-6-6'],
     back: ['m12 19-7-7 7-7', 'M19 12H5'],
     mic: ['M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z', 'M19 10v2a7 7 0 0 1-14 0v-2', 'M12 19v3'],
@@ -353,6 +366,20 @@
     try { localStorage.setItem(LS_PENDIENTES, JSON.stringify(lista || [])); return true; }
     catch (_) { return false; }
   }
+  // v1.0.9 — claves de los avisos ya vistos (mismo patrón que los pendientes)
+  function leerAvisosVistos() {
+    try { const v = JSON.parse(localStorage.getItem(LS_AVISOS_VISTOS) || '[]'); return Array.isArray(v) ? v : []; }
+    catch (_) { return []; }
+  }
+  function escribirAvisosVistos(lista) {
+    try { localStorage.setItem(LS_AVISOS_VISTOS, JSON.stringify(lista || [])); return true; }
+    catch (_) { return false; }
+  }
+  // v1.0.9 — «2026-12-15» → «15 de diciembre»
+  function diaTexto(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+    return m ? `${Number(m[3])} de ${MESES[Number(m[2]) - 1]}` : '';
+  }
 
   // ═════════════════════════════════════════════════════════════════════════
   // ELEMENTO
@@ -384,6 +411,8 @@
       this._errorAcceso = '';
       this._rpcPend = new Map();
       this._visitas = [];
+      this._avisos = [];             // v1.0.9: avisos de la empresa
+      this._avisosTs = 0;            // v1.0.9: última petición
       this._toastTimer = null;
       this._borrador = null;         // informe sin enviar (uno, el último)
 
@@ -484,6 +513,7 @@
       this._comercial = cfg.comercial || { nombre: '', rol: '', foto: '' };
       this._go('home');
       this._cargarVisitas();
+      this._cargarAvisos();     // v1.0.9
       this._enviarPendientes();
     }
 
@@ -542,6 +572,7 @@
       this._cambiada = false;
       this._go('home');
       this._cargarVisitas();
+      this._cargarAvisos();     // v1.0.9
     }
 
     _toast(texto) {
@@ -581,6 +612,35 @@
         this._visitas = Array.isArray(r.visitas) ? r.visitas : [];
         if (this._screen === 'home' || this._screen === 'arrived') this._pintar();
       }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // AVISOS DE LA EMPRESA (v1.0.9)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    async _cargarAvisos(forzar) {
+      if (!forzar && Date.now() - this._avisosTs < AVISOS_REFRESCO_MS) return;
+      this._avisosTs = Date.now();
+      const r = await this._rpc('avisos', {});
+      if (!r || !r.ok) { this._avisosTs = 0; return; }   // se reintenta la próxima vez
+      this._avisos = Array.isArray(r.avisos) ? r.avisos : [];
+      if (this._screen === 'avisos') this._marcarAvisosVistos();
+      if (this._screen === 'home' || this._screen === 'avisos') this._pintar();
+    }
+
+    _avisosSinVer() {
+      const vistos = leerAvisosVistos();
+      return this._avisos.filter((a) => vistos.indexOf(a.clave) < 0).length;
+    }
+
+    _marcarAvisosVistos() {
+      if (this._avisos.length) escribirAvisosVistos(this._avisos.map((a) => a.clave));
+    }
+
+    _abrirAvisos() {
+      this._marcarAvisosVistos();
+      this._go('avisos');
+      this._cargarAvisos(true);
     }
 
     _nuevaVisita() { this._modo = 'nueva'; this._prepararBusqueda(); }
@@ -1485,6 +1545,7 @@
           case 'inicio': this._pararGrabacion(true); this._inicio(); break;
           case 'nuevaVisita': this._nuevaVisita(); break;
           case 'heLlegado': this._heLlegado(); break;
+          case 'avisos': this._abrirAvisos(); break;   // v1.0.9
           case 'abrirVisita': this._abrirVisitaDeHoy(arg); break;
           case 'masTarde': this._inicio(); break;
           case 'contar': this._texto = ''; this._textoPrevio = ''; this._informe = null; this._grabacion = null; this._go('visit'); break;
@@ -1572,7 +1633,8 @@
         offline: () => this._vOffline(),
         leyendoTicket: () => this._vLeyendoTicket(),   // v1.0.5
         ticket: () => this._vTicket(),
-        badticket: () => this._vBadTicket()
+        badticket: () => this._vBadTicket(),
+        avisos: () => this._vAvisos()   // v1.0.9
       }[this._screen] || (() => '');
       // v1.0.5: si se repinta la misma pantalla, se conserva el desplazamiento
       const misma = this._ultimaPintada === this._screen;
@@ -1648,12 +1710,26 @@
       }
 
       return `<div class="scroll home">
-        <div class="yo">${foto}<div class="yo-t"><div class="yo-nom">${this._escape(c.nombre || '')}</div><div class="yo-fecha">${this._escape(hoyTexto())}</div></div></div>
+        <div class="yo">${foto}<div class="yo-t"><div class="yo-nom">${this._escape(c.nombre || '')}</div><div class="yo-fecha">${this._escape(hoyTexto())}</div></div><button class="info-b" data-accion="avisos" aria-label="Avisos">${ico('info')}${this._avisosSinVer() ? '<span class="info-dot"></span>' : ''}</button></div>
         <button class="nueva" data-accion="nuevaVisita"><span class="nueva-ico"><span class="i36">${ico('plus')}</span></span><span>Nueva visita</span></button>
         <button class="llegue" data-accion="heLlegado"><span class="i32">${ico('pin')}</span><span>He llegado</span></button>
         <div class="seccion">Visitas de hoy</div>
         <div class="lista">${tarjetas}</div>
       </div>${hoja}`;
+    }
+
+    // v1.0.9 — avisos de la empresa
+    _vAvisos() {
+      const lista = this._avisos.map((a) => `<div class="aviso">
+          <div class="aviso-f">${this._escape(diaTexto(a.fecha))}</div>
+          <div class="aviso-m">${this._escape(a.mensaje)}</div>
+        </div>`).join('') || '<div class="vacio">No hay avisos.</div>';
+      return `<div class="col">
+        <div class="scroll grow">
+          ${this._cabecera('Avisos')}
+          <div class="col g14 pad-r">${lista}</div>
+        </div>
+      </div>`;
     }
 
     _vPick() {
@@ -2109,6 +2185,13 @@
   .nueva { height: 116px; flex: none; border-radius: 28px; background: ${C.fucsia}; color: ${C.blanco}; display: flex; align-items: center; gap: 18px; padding: 0 24px; box-shadow: 0 14px 28px -14px rgba(232,10,77,.7); font-size: 28px; font-weight: 700; transition: transform .1s; }
   .nueva-ico { width: 64px; height: 64px; flex: none; border-radius: 50%; background: rgba(255,255,255,.2); display: flex; align-items: center; justify-content: center; }
   .llegue { height: 80px; flex: none; border-radius: 24px; background: ${C.verdeAz}; color: ${C.blanco}; display: flex; align-items: center; gap: 16px; padding: 0 24px; font-size: 22px; font-weight: 700; transition: transform .1s; }
+  /* v1.0.9 — avisos */
+  .info-b { position: relative; width: 52px; height: 52px; flex: none; margin-left: auto; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: ${C.verdeAz}; }
+  .info-b svg { width: 34px; height: 34px; }
+  .info-dot { position: absolute; top: 6px; right: 6px; width: 14px; height: 14px; border-radius: 50%; background: ${C.fucsia}; box-shadow: 0 0 0 2px ${C.fondo}; }
+  .aviso { border-radius: 20px; background: ${C.blanco}; border: 1px solid ${C.linea}; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+  .aviso-f { font-size: 15px; font-weight: 600; color: ${C.gris}; }
+  .aviso-m { font-size: 18px; line-height: 1.45; color: ${C.tinta}; white-space: pre-line; overflow-wrap: anywhere; }
   .seccion { font-size: 18px; font-weight: 700; color: ${C.verdeNeg}; margin-top: 6px; }
   .lista { display: flex; flex-direction: column; gap: 10px; }
   .tarjeta { min-height: 76px; border-radius: 20px; background: ${C.blanco}; border: 1px solid ${C.linea}; display: flex; align-items: center; gap: 14px; padding: 10px 14px; width: 100%; flex: none; }
