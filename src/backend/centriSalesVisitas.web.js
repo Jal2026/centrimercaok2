@@ -1,8 +1,13 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Visitas (Wix Velo)
  * Archivo:  backend/centriSalesVisitas.web.js
- * VERSION:  1.1.2
- * FECHA:    25 Octubre 2026
+ * VERSION:  1.1.3
+ * FECHA:    26 Octubre 2026
+ *
+ * v1.1.3 — 26 OCT 2026 · centriSalesVisitasHoy acepta { dia: 'AAAA-MM-DD' }
+ *   (Jal: ir a otro día desde el calendario del inicio). Sin dia, o con el de
+ *   hoy, igual que antes. Días futuros o mal escritos → DIA_NO_VALIDO. Abrir,
+ *   completar y reenviar una visita de otro día ya funcionaba por visitaId.
  *
  * v1.1.2 — 25 OCT 2026 · Resultados válidos = los de centriSalesLab 1.5.1
  *   (fuera «oferta», entra «ventas»; nuevos negociacion, administrativa,
@@ -45,7 +50,7 @@
  *       cliente sin informe), completa esa visita; si no, crea una nueva.
  *       Si el mismo informe ya se guardó (reintento tras un corte de red con
  *       el guardado hecho), devuelve la visita existente y no duplica.
- *   · centriSalesVisitasHoy()
+ *   · centriSalesVisitasHoy({ dia? })   (dia desde v1.1.3)
  *       Las visitas de HOY (Europe/Madrid) del comercial que llama.
  *   · centriSalesLeerVisita({ id }) (v1.1.0)
  *       Una visita entera del comercial que llama, para reabrir su informe.
@@ -92,7 +97,7 @@ import { webMethod, Permissions } from 'wix-web-module';
 import wixData from 'wix-data';
 import { currentMember } from 'wix-members-backend';
 
-const VERSION = '1.1.2';
+const VERSION = '1.1.3';
 const TAG = `[CentriSalesVisitas][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -591,19 +596,49 @@ export const centriSalesLeerVisita = webMethod(
 );
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 3. VISITAS DE HOY
+// 3. VISITAS DE HOY (o de otro día, v1.1.3)
+//   payload: { dia?: 'AAAA-MM-DD' }  (sin dia = hoy)
 //   return : { ok, version, visitas:[…] }  (más recientes primero)
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * v1.1.3 — Visitas de un día (Europe/Madrid) de un comercial. Se piden las
+ * creadas entre dos días antes y dos días después y se filtran por el día de
+ * su llegada, su informe o su creación (la misma referencia que _esDeHoy).
+ */
+async function _visitasDelDia(comercialId, dia) {
+  const base = new Date(`${dia}T12:00:00Z`);
+  const desde = new Date(base.getTime() - 48 * 60 * 60 * 1000);
+  const hasta = new Date(base.getTime() + 48 * 60 * 60 * 1000);
+  const res = await wixData.query(C_VISITAS)
+    .eq(F.comercialId, comercialId)
+    .ge('_createdDate', desde)
+    .le('_createdDate', hasta)
+    .limit(200)
+    .find(AUTH);
+  return (res.items || []).filter((it) => {
+    const ref = _fecha(it[F.llegada]) || _fecha(it[F.reporte]) || _fecha(it._createdDate);
+    return !!ref && _diaMadrid(ref) === dia;
+  });
+}
+
 export const centriSalesVisitasHoy = webMethod(
   Permissions.SiteMember,
-  async () => {
+  async (payload) => {
     const acceso = await _reconocerComercial();
     if (!acceso.ok) return { ok: false, version: VERSION, error: { code: 'SIN_ACCESO', message: acceso.error } };
 
+    // v1.1.3 — día pedido
+    const diaHoy = _diaMadrid(new Date());
+    const dia = _txt(payload && payload.dia);
+    if (dia && (!/^\d{4}-\d{2}-\d{2}$/.test(dia) || isNaN(new Date(`${dia}T12:00:00Z`).getTime()) || dia > diaHoy)) {
+      return { ok: false, version: VERSION, error: { code: 'DIA_NO_VALIDO', message: 'Elige un día de hoy hacia atrás.' } };
+    }
+
     try {
-      const recientes = await _visitasRecientes(acceso.comercial.id);
-      const hoy = recientes.filter(_esDeHoy);
+      const hoy = (dia && dia !== diaHoy)
+        ? await _visitasDelDia(acceso.comercial.id, dia)
+        : (await _visitasRecientes(acceso.comercial.id)).filter(_esDeHoy);
       hoy.sort((a, b) => {
         const ra = _fecha(a[F.llegada]) || _fecha(a[F.reporte]) || _fecha(a._createdDate);
         const rb = _fecha(b[F.llegada]) || _fecha(b[F.reporte]) || _fecha(b._createdDate);
