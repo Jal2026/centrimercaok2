@@ -1,8 +1,12 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Page Code
  * Página:   Centri Sales (solo miembros con el rol «AppVentas»)
- * VERSION:  1.0.2 (BETA)
- * FECHA:    25 Octubre 2026
+ * VERSION:  1.0.3 (BETA)
+ * FECHA:    26 Octubre 2026
+ *
+ * v1.0.3 — 26 OCT 2026 · Nuevo método avisos (avisos de la empresa, la «i»
+ *   del inicio). Requiere backend/centriSalesAvisos.web.js v1.0.0 y
+ *   centriSales.js v1.0.9.
  *
  * v1.0.2 — 25 OCT 2026 · Nuevo método leerVisita (reabrir un informe ya
  *   enviado). Requiere centriSalesVisitas v1.1.0 y centriSales.js v1.0.4.
@@ -16,6 +20,7 @@
  * Puente entre el custom element <centri-sales> y los webMethods:
  *   · backend/centriSalesClientes.web.js v1.2.1
  *   · backend/centriSalesVisitas.web.js  v1.1.0
+ *   · backend/centriSalesAvisos.web.js   v1.0.0 (v1.0.3)
  *
  *   1. Registra el listener 'sales-rpc' ANTES de enviar la config.
  *      El element emite { reqId, metodo, args }; aquí se llama al webMethod
@@ -52,12 +57,13 @@ import {
   centriSalesVisitasHoy,
   centriSalesLeerVisita
 } from 'backend/centriSalesVisitas.web';
+import { centriSalesAvisos } from 'backend/centriSalesAvisos.web';   // v1.0.3
 
 // ── CONFIGURACIÓN ──────────────────────────────────────────────────────────
 
 const EL_ID = '#centriSales';   // ← ajustar si el Element ID del editor difiere
 
-const V = 'CENTRI SALES Page v1.0.2';
+const V = 'CENTRI SALES Page v1.0.3';
 
 // Métodos que el element puede pedir. Cualquier otro nombre se rechaza.
 const METODOS = {
@@ -66,7 +72,8 @@ const METODOS = {
   guardarLlegada: centriSalesGuardarLlegada,
   guardarVisita:  centriSalesGuardarVisita,
   visitasHoy:     centriSalesVisitasHoy,
-  leerVisita:     centriSalesLeerVisita      // v1.0.2
+  leerVisita:     centriSalesLeerVisita,     // v1.0.2
+  avisos:         centriSalesAvisos          // v1.0.3
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
