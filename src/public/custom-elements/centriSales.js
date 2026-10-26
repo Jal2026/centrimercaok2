@@ -2,8 +2,12 @@
  * CENTRIMERCA — CENTRI SALES · App de los comerciales (Wix Custom Element)
  * Archivo:  public/custom-elements/centriSales.js
  * Tag name: centri-sales
- * VERSION:  1.0.9 (BETA)
+ * VERSION:  1.0.10 (BETA)
  * FECHA:    26 Octubre 2026
+ *
+ * v1.0.10 — 26 OCT 2026 · Único cambio: «Cambiar» del resultado sube a la
+ *   línea de «Resultado» y es más pequeño. Con «Presentación» el botón
+ *   tapaba la palabra (Jal, iPhone).
  *
  * v1.0.9 — 26 OCT 2026 · AVISOS DE LA EMPRESA (Jal): «i» en un círculo arriba
  *   a la derecha del inicio. Punto fucsia si hay avisos sin ver; al tocarla,
@@ -2014,8 +2018,7 @@
             <div class="caja g14">
               <div class="res">
                 <span class="res-i" style="background:${res.bg}">${ico(res.icon)}</span>
-                <span class="res-t"><span class="t-gris16">Resultado</span><span class="res-l">${res.label}</span></span>
-                <button class="cambiar" data-accion="cambiarRes">Cambiar</button>
+                <span class="res-t"><span class="res-top"><span class="t-gris16">Resultado</span><button class="cambiar" data-accion="cambiarRes">Cambiar</button></span><span class="res-l">${res.label}</span></span>
               </div>
               ${this._resOpen ? `<div class="res-grid">${opciones}</div>` : ''}
               ${inf.resumen ? `<div class="resumen">${this._escape(inf.resumen)}</div>` : ''}
@@ -2300,7 +2303,8 @@
   .res-i svg { width: 38px; height: 38px; }
   .res-t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .res-l { font-size: 24px; font-weight: 700; color: ${C.verdeNeg}; }
-  .cambiar { flex: none; white-space: nowrap; min-height: 48px; padding: 0 14px; border-radius: 999px; border: 2px solid ${C.linea}; display: flex; align-items: center; font-size: 16px; font-weight: 700; color: ${C.verdeAz}; }
+  .res-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }   /* v1.0.10 */
+  .cambiar { flex: none; white-space: nowrap; min-height: 36px; padding: 0 12px; border-radius: 999px; border: 2px solid ${C.linea}; display: flex; align-items: center; font-size: 15px; font-weight: 700; color: ${C.verdeAz}; }   /* v1.0.10: 48 → 36 px, 16 → 15 px */
   .res-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; animation: fade .2s both; }
   .res-op { min-height: 64px; border-radius: 18px; border: 2px solid ${C.linea}; display: flex; align-items: center; gap: 10px; padding: 0 12px; font-size: 16px; font-weight: 700; color: ${C.tinta}; width: 100%; }
   .res-op.sel { border-color: ${C.verdeAz}; }
