@@ -6,9 +6,38 @@
 <title>CENTRIMERCA · App de Ventas</title>
 
 <!-- ═══════════════════════════════════════════════════════════════════════
-     CENTRIMERCA — Panel de la App de Ventas · v1.0.0 · 2 Nov 2026
+     CENTRIMERCA — Panel de la App de Ventas · v1.0.3 · 2 Nov 2026
 
-     REQUIERE: backend/centriSalesPanel.web.js v1.0.0 + CentriSalesPanel.page.js v1.0.0
+     v1.0.3 — Botón «Copiar» en la lectura del periodo (Jal). Solo aparece
+       cuando hay una lectura. Copia título, periodo, lectura y nota de la IA:
+       con formato (HTML) para correo o documentos y en texto limpio para
+       WhatsApp o notas. Si el portapapeles moderno no está permitido en el
+       marco, usa la copia clásica (execCommand). Backend y page code sin
+       cambios.
+
+     v1.0.2 — Fuera el bloque «Informes anteriores» (Jal: una herramienta de
+       mantenimiento no va en la interfaz de un producto). Se quitan su HTML,
+       sus variables, su botón y sus mensajes (reinterpretado y el error con
+       origen reinterpretar). Plurales bien escritos en «llegada sin informe»
+       y en la nota de la lectura (antes «llegada(s)», «visita(s)»).
+       Backend y page code sin cambios.
+
+     v1.0.1 — COLOR EN EL ANÁLISIS (Jal: «tanto verde cansa y aburre»). Solo
+       widget, sin cambios de lógica ni de mensajes:
+       - Cada situación con su color, igual en tarjetas, tabla y marcas de la
+         lista: positiva verde, negativa fucsia, oportunidad naranja,
+         seguimiento azul, vencido rojo; pedidos violeta.
+       - Barras: resultados y alertas con color propio por valor; el resto
+         (objeciones, valoran, dudas, peticiones, productos) con una paleta
+         variada (PALETA). Fondo de las barras en gris claro.
+       - Tabla por comercial: las cifras distintas de 0 van en el color de su
+         columna; cabeceras con su punto de color.
+       - Píldora del resultado (lista de visitas e informe) en el color de su
+         resultado.
+       Requiere backend/centriSalesPanel.web.js 1.0.1 (o 1.0.0) y el mismo
+       page code 1.0.0.
+
+     REQUIERE: backend/centriSalesPanel.web.js v1.0.1 + CentriSalesPanel.page.js v1.0.0
      ELEMENTO:  #htmlPanelVentas (HtmlComponent)   ← confirma el Element ID
 
      Cuatro apartados (Jal, 2-nov-2026):
@@ -44,7 +73,12 @@
   --accent-dim:rgba(0,97,102,.06);--accent-light:rgba(0,97,102,.14);
   --hi:#b8632a;--hi-dim:rgba(184,99,42,.08);--hi-light:rgba(184,99,42,.16);
   --green:#2b7a4b;--red:#c0504d;--amber:#a8790f;
-  --font:'Bai Jamjuree',sans-serif;--shadow:0 1px 4px rgba(0,0,0,.06);--r:8px
+  --font:'Bai Jamjuree',sans-serif;--shadow:0 1px 4px rgba(0,0,0,.06);--r:8px;
+  /* v1.0.1 — colores del análisis: relleno (c-) y texto legible (t-) */
+  --c-pos:#09A072;--t-pos:#067A57;--c-neg:#E80A4D;--t-neg:#C2083F;
+  --c-opo:#F2994A;--t-opo:#B9600F;--c-seg:#2D9CDB;--t-seg:#1A6FA3;
+  --c-ven:#C0392B;--t-ven:#A93226;--c-ped:#9B51E0;--t-ped:#7A33BD;
+  --c-reu:#006166;--t-reu:#00494d;--pista:#edf1f0
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;background:var(--bg);color:var(--fg);font-family:var(--font);font-size:13px;line-height:1.5}
@@ -137,13 +171,13 @@ textarea::placeholder,input::placeholder{color:var(--muted2)}
 
 /* Píldoras y situaciones */
 .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;background:var(--panel3);color:var(--fg2);margin:0 4px 4px 0;white-space:nowrap}
-.pill.res{background:var(--accent-light);color:var(--accent2)}
+.pill.res{background:var(--accent-light);color:var(--fg);border-radius:4px}
 .sit{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border-radius:999px;font-size:10.5px;font-weight:700;margin-left:3px}
-.sit-positiva{background:rgba(43,122,75,.12);color:var(--green)}
-.sit-negativa{background:rgba(192,80,77,.12);color:var(--red)}
-.sit-oportunidad{background:var(--hi-light);color:var(--hi)}
-.sit-seguimiento{background:var(--accent-light);color:var(--accent)}
-.sit-vencido{background:var(--red);color:#fff}
+.sit-positiva{background:rgba(9,160,114,.14);color:var(--t-pos)}
+.sit-negativa{background:rgba(232,10,77,.12);color:var(--t-neg)}
+.sit-oportunidad{background:rgba(242,153,74,.18);color:var(--t-opo)}
+.sit-seguimiento{background:rgba(45,156,219,.15);color:var(--t-seg)}
+.sit-vencido{background:var(--c-ven);color:#fff}
 
 /* Detalle de visita */
 .det-h{font-size:17px;font-weight:700;color:var(--fg)}
@@ -160,11 +194,21 @@ details.trans .caja{margin-top:6px;white-space:pre-wrap}
 
 /* Barómetro */
 .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
-.kpi{border:1px solid var(--line);border-radius:var(--r);background:var(--panel2);padding:10px 12px;cursor:default}
+.kpi{border:1px solid var(--line);border-left:5px solid var(--line3);border-radius:var(--r);background:var(--panel2);padding:10px 12px;cursor:default}
 .kpi .n{font-size:24px;font-weight:700;line-height:1.1;color:var(--fg)}
 .kpi .t{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-top:3px}
-.kpi.positiva .n{color:var(--green)} .kpi.negativa .n{color:var(--red)}
-.kpi.oportunidad .n{color:var(--hi)} .kpi.seguimiento .n{color:var(--accent)} .kpi.vencido .n{color:var(--red)}
+.kpi.reuniones{border-left-color:var(--c-reu);background:rgba(0,97,102,.06)} .kpi.reuniones .n{color:var(--t-reu)}
+.kpi.positiva{border-left-color:var(--c-pos);background:rgba(9,160,114,.07)} .kpi.positiva .n{color:var(--t-pos)}
+.kpi.negativa{border-left-color:var(--c-neg);background:rgba(232,10,77,.06)} .kpi.negativa .n{color:var(--t-neg)}
+.kpi.oportunidad{border-left-color:var(--c-opo);background:rgba(242,153,74,.09)} .kpi.oportunidad .n{color:var(--t-opo)}
+.kpi.seguimiento{border-left-color:var(--c-seg);background:rgba(45,156,219,.08)} .kpi.seguimiento .n{color:var(--t-seg)}
+.kpi.vencido{border-left-color:var(--c-ven);background:rgba(192,57,43,.07)} .kpi.vencido .n{color:var(--t-ven)}
+.kpi.pedidos{border-left-color:var(--c-ped);background:rgba(155,81,224,.07)} .kpi.pedidos .n{color:var(--t-ped)}
+/* Tabla por comercial: cifras de color y punto en la cabecera */
+.tabla td.c-pos,.tabla td.c-neg,.tabla td.c-opo,.tabla td.c-seg,.tabla td.c-ven,.tabla td.c-ped{font-weight:700}
+.tabla td.c-pos{color:var(--t-pos)} .tabla td.c-neg{color:var(--t-neg)} .tabla td.c-opo{color:var(--t-opo)}
+.tabla td.c-seg{color:var(--t-seg)} .tabla td.c-ven{color:var(--t-ven)} .tabla td.c-ped{color:var(--t-ped)}
+.punto{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:1px}
 .tabla{width:100%;border-collapse:collapse;font-size:12.5px}
 .tabla th{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;text-align:right;padding:6px 8px;border-bottom:1px solid var(--line);font-weight:600}
 .tabla th:first-child,.tabla td:first-child{text-align:left}
@@ -175,8 +219,8 @@ details.trans .caja{margin-top:6px;white-space:pre-wrap}
 .tabla-wrap{overflow-x:auto}
 .barras{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px 18px}
 .barra{display:grid;grid-template-columns:minmax(0,1fr) 34px;gap:8px;align-items:center;margin-bottom:5px;font-size:12px;color:var(--fg2)}
-.barra .b{height:8px;border-radius:4px;background:var(--accent-light);position:relative;overflow:hidden;margin-top:3px}
-.barra .b i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:4px}
+.barra .b{height:10px;border-radius:5px;background:var(--pista);position:relative;overflow:hidden;margin-top:3px}
+.barra .b i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:5px}
 .barra .v{text-align:right;font-weight:600;color:var(--fg)}
 .lectura{font-size:13.5px;line-height:1.6;color:var(--fg2)}
 .lectura h2{font-size:13px;color:var(--accent);text-transform:uppercase;letter-spacing:.5px;margin:16px 0 6px}
@@ -325,25 +369,18 @@ details.trans .caja{margin-top:6px;white-space:pre-wrap}
           <p class="hint">La prepara la IA con el barómetro y los informes del periodo. Describe la situación de trabajo; nunca el ánimo de las personas.</p>
           <div class="actions" style="margin-top:0">
             <button class="btn btn-sm" id="btnLectura">Preparar lectura</button>
+            <button class="btn btn-sm btn-2" id="btnCopiar" style="display:none">Copiar</button>
           </div>
           <div id="lectura"></div>
         </div>
 
-        <div class="sec">
-          <h3>Informes anteriores</h3>
-          <p class="hint">Las visitas enviadas antes del 2 de noviembre no tienen «lo que el cliente valora» ni las «dudas de trabajo». Se pueden completar desde la grabación transcrita; lo demás del informe no se toca.</p>
-          <div class="actions" style="margin-top:0">
-            <button class="btn btn-sm btn-2" id="btnReinterpretar">Completar informes anteriores</button>
-            <span class="hint" id="reEstado" style="margin:0"></span>
-          </div>
-        </div>
       </div>
 
     </div>
   </div>
 
   <div class="ft">
-    <span>Panel App de Ventas v1.0.0</span>
+    <span>Panel App de Ventas v1.0.3</span>
   </div>
 
 </div>
@@ -389,6 +426,30 @@ var SITUACIONES = [
   { k:'vencido',     label:'Seguimiento vencido',  corto:'!' }
 ];
 function et(campo, v){ return (ETIQUETAS[campo] && ETIQUETAS[campo][v]) || v || '—'; }
+
+/* v1.0.1 — colores de las barras. Resultados y alertas, con color propio por
+   valor; el resto, con PALETA por orden de aparición. */
+var COLORES = {
+  resultado: {
+    pedido:'#09A072', ventas:'#2D9CDB', negociacion:'#9B51E0', seguimiento:'#56B4E9',
+    administrativa:'#7F8C8D', incidencia:'#E80A4D', presentacion:'#F2C94C', cortesia:'#F2994A',
+    sin_interes:'#EB5757', no_atendido:'#B0BEC5', otro:'#95A5A6', sin_dato:'#CFD8DC'
+  },
+  alertas: {
+    riesgo_impago:'#C0392B', queja:'#E80A4D', riesgo_perdida:'#F2994A',
+    descuento_solicitado:'#F2C94C', oportunidad:'#09A072'
+  }
+};
+var PALETA = ['#2D9CDB','#F2994A','#9B51E0','#E80A4D','#09A072','#F2C94C','#56CCF2','#EB5757','#006166','#BB6BD9'];
+/* Píldora del resultado: fondo suave del color del resultado, texto oscuro. */
+function pillRes(clave, texto){
+  var c = (COLORES.resultado[clave] || '#95A5A6').replace('#', '');
+  var r = parseInt(c.slice(0,2),16), g = parseInt(c.slice(2,4),16), b = parseInt(c.slice(4,6),16);
+  return '<span class="pill res" style="background:rgba('+r+','+g+','+b+',.18);box-shadow:inset 3px 0 0 #'+c+'">'+esc(texto)+'</span>';
+}
+function colorBarra(campo, clave, i){
+  return (COLORES[campo] && COLORES[campo][clave]) || PALETA[i % PALETA.length];
+}
 function res(v){ return RESULTADOS[v] || v || '—'; }
 
 /* ═════════════════════════════════════════════════════════════════════════
@@ -399,8 +460,6 @@ var U = { usuarios: [], equipo: null, ocupado: {} };
 var A = { desde:'', hasta:'', comercialId:'', resultado:'', situacion:'', visitas:[], selId:'', cargada:false };
 var M = { avisos: [], editId:'', para:'todos', elegidos:{} };
 var N = { desde:'', hasta:'', b:null, ver:'', lecturas:{} };
-var reEnCurso = false;
-var reCortes = 0;                // lotes cortados seguidos al completar informes
 
 var $ = function(id){ return document.getElementById(id); };
 
@@ -574,7 +633,7 @@ function renderVisitas(){
     h += '<div class="res-item click'+(v.id===A.selId?' sel':'')+'" data-visita="'+esc(v.id)+'">' +
       '<div class="res-main"><div class="res-title">'+esc(v.cliente || 'Cliente sin indicar')+'</div>' +
       '<div class="res-sub">'+fechaCorta(v.dia)+' '+esc(v.hora)+' · '+esc(v.comercial)+'</div>' +
-      '<div style="margin-top:4px"><span class="pill res">'+esc(titulo)+'</span>' +
+      '<div style="margin-top:4px">'+pillRes(v.estado==='enviada' ? v.resultado : 'no_atendido', titulo) +
       (v.pedido && v.pedido.hay && v.pedido.importe!==null ? '<span class="pill">'+esc(euros(v.pedido.importe))+'</span>' : '') +
       '</div></div>' +
       '<div class="res-side">'+sits(v.situaciones)+'</div>' +
@@ -613,7 +672,7 @@ function renderDetalle(v){
     h += '<p class="hint" style="margin-top:10px">Marcó la llegada pero aún no ha enviado el informe.</p>';
   } else {
     h += '<dl class="kv">' +
-      '<dt>Resultado</dt><dd><span class="pill res">'+esc(res(v.resultado))+'</span></dd>' +
+      '<dt>Resultado</dt><dd>'+pillRes(v.resultado, res(v.resultado))+'</dd>' +
       '<dt>Interés</dt><dd>'+esc(et('interes', v.interes))+'</dd>' +
       '<dt>Pedido</dt><dd>'+(v.pedido.hay ? esc(v.pedido.descripcion || 'Sí') + (v.pedido.importe!==null ? ' · <b>'+esc(euros(v.pedido.importe))+'</b>' : '') : 'No')+'</dd>' +
       '</dl>' +
@@ -737,32 +796,42 @@ function datosVer(){
 function renderBarometro(){
   var e = N.b.equipo;
   var k = [
-    ['Reuniones', e.reuniones, ''], ['Positivas', e.positivas, 'positiva'], ['Negativas', e.negativas, 'negativa'],
+    ['Reuniones', e.reuniones, 'reuniones'], ['Positivas', e.positivas, 'positiva'], ['Negativas', e.negativas, 'negativa'],
     ['Oportunidades', e.oportunidades, 'oportunidad'], ['Seguimiento', e.seguimientos, 'seguimiento'],
-    ['Vencidos', e.vencidos, 'vencido'], ['Pedidos', e.pedidos, '', e.importePedidos ? euros(e.importePedidos) : '']
+    ['Vencidos', e.vencidos, 'vencido'], ['Pedidos', e.pedidos, 'pedidos', e.importePedidos ? euros(e.importePedidos) : '']
   ];
   $('kpis').innerHTML = '<div class="kpis">' + k.map(function(x){
     return '<div class="kpi '+x[2]+'"><div class="n">'+esc(x[1])+'</div><div class="t">'+x[0]+'</div>' +
       (x[3] ? '<div class="t" style="text-transform:none;color:var(--fg2);font-weight:600">'+esc(x[3])+'</div>' : '') + '</div>';
-  }).join('') + '</div>' + (e.llegadasSinInforme ? '<p class="hint" style="margin-top:8px">'+e.llegadasSinInforme+' llegada(s) sin informe en el periodo.</p>' : '');
+  }).join('') + '</div>' + (e.llegadasSinInforme ? '<p class="hint" style="margin-top:8px">'+(e.llegadasSinInforme===1 ? '1 llegada sin informe' : e.llegadasSinInforme+' llegadas sin informe')+' en el periodo.</p>' : '');
 
-  var t = '<table class="tabla"><thead><tr><th>Comercial</th><th>Reuniones</th><th>Positivas</th><th>Negativas</th><th>Oportun.</th><th>Seguim.</th><th>Vencidos</th><th>Pedidos</th><th>Sin informe</th></tr></thead><tbody>';
-  t += '<tr class="click'+(N.ver===''?' sel':'')+'" data-ver=""><td><b>Todo el equipo</b></td><td>'+e.reuniones+'</td><td>'+e.positivas+'</td><td>'+e.negativas+'</td><td>'+e.oportunidades+'</td><td>'+e.seguimientos+'</td><td>'+e.vencidos+'</td><td>'+e.pedidos+'</td><td>'+e.llegadasSinInforme+'</td></tr>';
+  // v1.0.1 — cifras distintas de 0 en el color de su columna
+  function cel(n, cls){ return '<td'+(n && cls ? ' class="'+cls+'"' : '')+'>'+n+'</td>'; }
+  function cifras(x){
+    return '<td>'+x.reuniones+'</td>' + cel(x.positivas,'c-pos') + cel(x.negativas,'c-neg') + cel(x.oportunidades,'c-opo') +
+      cel(x.seguimientos,'c-seg') + cel(x.vencidos,'c-ven') + cel(x.pedidos,'c-ped') + '<td>'+x.llegadasSinInforme+'</td>';
+  }
+  function th(txt, color){ return '<th>'+(color ? '<span class="punto" style="background:'+color+'"></span>' : '')+txt+'</th>'; }
+  var t = '<table class="tabla"><thead><tr><th>Comercial</th>' + th('Reuniones', 'var(--c-reu)') + th('Positivas', 'var(--c-pos)') +
+    th('Negativas', 'var(--c-neg)') + th('Oportun.', 'var(--c-opo)') + th('Seguim.', 'var(--c-seg)') + th('Vencidos', 'var(--c-ven)') +
+    th('Pedidos', 'var(--c-ped)') + th('Sin informe', '') + '</tr></thead><tbody>';
+  t += '<tr class="click'+(N.ver===''?' sel':'')+'" data-ver=""><td><b>Todo el equipo</b></td>'+cifras(e)+'</tr>';
   N.b.porComercial.forEach(function(c){
-    t += '<tr class="click'+(N.ver===c.comercialId?' sel':'')+'" data-ver="'+esc(c.comercialId)+'"><td>'+esc(c.comercial)+'</td><td>'+c.reuniones+'</td><td>'+c.positivas+'</td><td>'+c.negativas+'</td><td>'+c.oportunidades+'</td><td>'+c.seguimientos+'</td><td>'+c.vencidos+'</td><td>'+c.pedidos+'</td><td>'+c.llegadasSinInforme+'</td></tr>';
+    t += '<tr class="click'+(N.ver===c.comercialId?' sel':'')+'" data-ver="'+esc(c.comercialId)+'"><td>'+esc(c.comercial)+'</td>'+cifras(c)+'</tr>';
   });
   $('porComercial').innerHTML = t + '</tbody></table>';
   renderDesglose();
 }
-function barras(titulo, mapa, campo){
+function barras(titulo, mapa, campo, desfase){
   var claves = Object.keys(mapa || {}).sort(function(a, b){ return mapa[b] - mapa[a]; });
   var max = 0; claves.forEach(function(k){ if (mapa[k] > max) max = mapa[k]; });
   var h = '<div><h4 style="margin-top:0">'+titulo+'</h4>';
   if (!claves.length) return h + '<div class="hint">—</div></div>';
-  claves.forEach(function(k){
+  claves.forEach(function(k, i){
     var nombre = campo==='resultado' ? res(k) : (campo ? et(campo, k) : k);
     if (k==='sin_dato') nombre = 'Sin dato';
-    h += '<div class="barra"><div>'+esc(nombre)+'<div class="b"><i style="width:'+Math.round(100*mapa[k]/max)+'%"></i></div></div><div class="v">'+mapa[k]+'</div></div>';
+    var color = colorBarra(campo, k, i + (desfase || 0));   // v1.0.1: cada bloque empieza por un color distinto
+    h += '<div class="barra"><div>'+esc(nombre)+'<div class="b"><i style="width:'+Math.round(100*mapa[k]/max)+'%;background:'+color+'"></i></div></div><div class="v">'+mapa[k]+'</div></div>';
   });
   return h + '</div>';
 }
@@ -775,11 +844,11 @@ function renderDesglose(){
   $('desglose').innerHTML =
     barras('Resultados', d.resultados, 'resultado') +
     barras('Alertas', d.alertas, 'alertas') +
-    barras('Objeciones', d.objeciones, 'objeciones') +
-    barras('Lo que valoran los clientes', d.valora, 'valora') +
-    barras('Dudas de trabajo', d.dudasTrabajo, 'dudasTrabajo') +
-    barras('Peticiones a otros departamentos', d.peticiones, 'responsable') +
-    barras('Productos más nombrados', productos, '');
+    barras('Objeciones', d.objeciones, 'objeciones', 1) +
+    barras('Lo que valoran los clientes', d.valora, 'valora', 4) +
+    barras('Dudas de trabajo', d.dudasTrabajo, 'dudasTrabajo', 2) +
+    barras('Peticiones a otros departamentos', d.peticiones, 'responsable', 6) +
+    barras('Productos más nombrados', productos, '', 0);
   renderLectura();
   notifyHeight();
 }
@@ -799,12 +868,68 @@ function md(texto){
 }
 function renderLectura(){
   var l = N.lecturas[claveLectura()];
+  $('btnCopiar').style.display = (l && !l.pidiendo) ? '' : 'none';   // v1.0.3
   if (!l){ $('lectura').innerHTML = ''; $('btnLectura').textContent = 'Preparar lectura'; return; }
   if (l.pidiendo){ $('lectura').innerHTML = '<div class="cargando">Preparando la lectura…</div>'; return; }
   $('btnLectura').textContent = 'Volver a preparar';
   $('lectura').innerHTML = '<div class="lectura" style="margin-top:12px">'+md(l.texto)+'</div>' +
-    '<div class="nota-ia">Preparada por IA con '+l.visitas+' visita(s) del '+fechaLarga(l.desde)+' al '+fechaLarga(l.hasta)+'. Revisa los datos antes de decidir.</div>';
+    '<div class="nota-ia">Preparada por IA con '+(l.visitas===1 ? '1 visita' : l.visitas+' visitas')+' del '+fechaLarga(l.desde)+' al '+fechaLarga(l.hasta)+'. Revisa los datos antes de decidir.</div>';
   notifyHeight();
+}
+
+/* v1.0.3 — Copiar la lectura. */
+function notaLectura(l){
+  return 'Preparada por IA con '+(l.visitas===1 ? '1 visita' : l.visitas+' visitas')+' del '+fechaLarga(l.desde)+' al '+fechaLarga(l.hasta)+'. Revisa los datos antes de decidir.';
+}
+/* Texto limpio: títulos en mayúsculas, viñetas «•», sin asteriscos. */
+function textoPlano(texto){
+  return String(texto||'').split('\n').map(function(l){
+    var t = l.trim().replace(/\*\*([^*]+)\*\*/g, '$1');
+    if (/^#{1,6}\s/.test(t)) return '\n' + t.replace(/^#{1,6}\s*/, '').toUpperCase();
+    if (/^[-*]\s/.test(t)) return '• ' + t.replace(/^[-*]\s*/, '');
+    return t;
+  }).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+function copiarLectura(){
+  var l = N.lecturas[claveLectura()];
+  if (!l || l.pidiendo) return;
+  var titulo = $('lTitulo').textContent;
+  var periodo = 'Del ' + fechaLarga(l.desde) + ' al ' + fechaLarga(l.hasta);
+  var plano = titulo + '\n' + periodo + '\n\n' + textoPlano(l.texto) + '\n\n' + notaLectura(l);
+  var html = '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5">' +
+    '<h1 style="font-size:18px;margin:0 0 4px">'+esc(titulo)+'</h1>' +
+    '<p style="margin:0 0 12px;color:#6b7a78">'+esc(periodo)+'</p>' + md(l.texto) +
+    '<p style="margin-top:12px;font-size:12px;color:#6b7a78">'+esc(notaLectura(l))+'</p></div>';
+
+  function hecho(){ toast('Lectura copiada.'); }
+  function clasico(){
+    // Copia clásica: funciona en marcos sin permiso de portapapeles.
+    var ta = document.createElement('textarea');
+    ta.value = plano; ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed'; ta.style.top = '-1000px'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    if (ok) hecho(); else toast('No se ha podido copiar. Selecciona el texto y cópialo a mano.', 5000);
+  }
+  try {
+    if (navigator.clipboard && window.ClipboardItem && navigator.clipboard.write){
+      var item = new ClipboardItem({
+        'text/html':  new Blob([html],  { type:'text/html' }),
+        'text/plain': new Blob([plano], { type:'text/plain' })
+      });
+      navigator.clipboard.write([item]).then(hecho, function(){
+        navigator.clipboard.writeText(plano).then(hecho, clasico);
+      });
+      return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(plano).then(hecho, clasico);
+      return;
+    }
+  } catch (e) { /* se cae a la copia clásica */ }
+  clasico();
 }
 
 /* ═════════════════════════════════════════════════════════════════════════
@@ -921,27 +1046,6 @@ window.addEventListener('message', function(event){
     return;
   }
 
-  if (msg.type==='reinterpretado'){
-    if (!p || !p.ok){
-      reEnCurso = false; $('btnReinterpretar').disabled = false;
-      $('reEstado').textContent = '';
-      toast('Error: ' + errorDe(p), 6000);
-      return;
-    }
-    reCortes = 0;
-    if (p.quedan > 0 && p.hechas > 0){
-      $('reEstado').textContent = 'Quedan ' + p.quedan + '…';
-      send('reinterpretar', { max: 2 });
-      return;
-    }
-    reEnCurso = false; $('btnReinterpretar').disabled = false;
-    $('reEstado').textContent = p.quedan > 0
-      ? ('Quedan ' + p.quedan + ' que no se pudieron completar. Vuelve a intentarlo más tarde.')
-      : 'Todos los informes están completos.';
-    if (N.b) pedirBarometro();
-    return;
-  }
-
   if (msg.type==='error'){
     // Excepción en el puente (p. ej. la lectura superó el tiempo de conexión).
     if (p && p.origen==='lectura'){
@@ -949,15 +1053,6 @@ window.addEventListener('message', function(event){
       Object.keys(N.lecturas).forEach(function(k){ if (N.lecturas[k].pidiendo) delete N.lecturas[k]; });
       renderLectura();
       toast('La lectura ha tardado demasiado. Vuelve a pedirla.', 6000);
-      return;
-    }
-    if (p && p.origen==='reinterpretar' && reEnCurso){
-      // Un lote que se corta no pierde nada (lo guardado, guardado está): se
-      // sigue de uno en uno. Tras 3 cortes seguidos, se para.
-      reCortes++;
-      if (reCortes <= 3){ send('reinterpretar', { max: 1 }); return; }
-      reEnCurso = false; $('btnReinterpretar').disabled = false;
-      $('reEstado').textContent = 'Se ha cortado la conexión varias veces. Vuelve a intentarlo más tarde.';
       return;
     }
     if (p && p.origen==='guardarAviso') $('mGuardar').disabled = false;
@@ -1037,18 +1132,13 @@ $('porComercial').addEventListener('click', function(e){
   N.ver = tr.getAttribute('data-ver');
   renderBarometro();
 });
+$('btnCopiar').addEventListener('click', copiarLectura);   // v1.0.3
 $('btnLectura').addEventListener('click', function(){
   if (!N.b) return;
   N.lecturas[claveLectura()] = { pidiendo:true };
   $('btnLectura').disabled = true;
   renderLectura();
   send('lectura', { desde:N.desde, hasta:N.hasta, comercialId:N.ver });
-});
-$('btnReinterpretar').addEventListener('click', function(){
-  if (reEnCurso) return;
-  reEnCurso = true; reCortes = 0; this.disabled = true;
-  $('reEstado').textContent = 'Completando…';
-  send('reinterpretar', { max: 2 });
 });
 
 /* ── Alto del iframe (el del Gestor de equipo) ───────────────────────── */
