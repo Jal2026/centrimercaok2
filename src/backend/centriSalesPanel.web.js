@@ -1,8 +1,14 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRIX · Panel de la App de Ventas (Wix Velo)
  * Archivo:  backend/centriSalesPanel.web.js
- * VERSION:  1.0.0
+ * VERSION:  1.0.1
  * FECHA:    2 Noviembre 2026
+ *
+ * v1.0.1 — 2 NOV 2026 · Único cambio: un resultado «oferta» guardado antes
+ *   de centriSalesLab 1.5.1 cuenta como «ventas» (decisión de Jal del 25-oct:
+ *   fuera «Oferta» en todas partes; el motor ya lo convertía, pero las
+ *   visitas antiguas lo tienen guardado). Afecta a la lista, el filtro, el
+ *   barómetro y la lectura. No se reescribe nada en la colección.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * QUÉ ES
@@ -114,7 +120,7 @@ import { fetch } from 'wix-fetch';
 import { getSecret } from 'wix-secrets-backend';
 import { informePruebaCore } from 'backend/centriSalesLab.web';
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const TAG = `[CentriSalesPanel][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -347,6 +353,15 @@ function _validarPeriodo(desde, hasta) {
   return '';
 }
 
+/**
+ * v1.0.1 — Resultado de la visita. «oferta» (anterior a centriSalesLab 1.5.1)
+ * cuenta como «ventas», igual que hace _validarInforme() del motor.
+ */
+function _resultadoDe(it, inf) {
+  const v = _txt(it[F.resultado]) || _txt(inf.resultado);
+  return v === 'oferta' ? 'ventas' : v;
+}
+
 /** Referencia temporal de una visita: llegada, informe o creación (como _visitasDelDia). */
 function _refVisita(it) {
   return _fecha(it[F.llegada]) || _fecha(it[F.reporte]) || _fecha(it._createdDate);
@@ -414,7 +429,7 @@ function _situaciones(it, hoy, indice) {
   if (_txt(it[F.estado]) !== ESTADO_ENVIADA) return s;
 
   const inf = _informe(it);
-  const resultado = _txt(it[F.resultado]) || _txt(inf.resultado);
+  const resultado = _resultadoDe(it, inf);   // v1.0.1
   const interes = _txt(it[F.interes]) || _txt(inf.interes);
   const alertas = _lista(inf.alertas);
   const pedido = inf.pedido && typeof inf.pedido === 'object' ? inf.pedido : {};
@@ -455,7 +470,7 @@ function _fila(it, hoy, indice) {
     contactId:    _txt(it[F.contactId]),
     cliente:      _txt(it[F.cliente]),
     estado:       _txt(it[F.estado]),
-    resultado:    _txt(it[F.resultado]) || _txt(inf.resultado),
+    resultado:    _resultadoDe(it, inf),   // v1.0.1
     interes:      _txt(it[F.interes]) || _txt(inf.interes),
     resumen:      _txt(inf.resumen).slice(0, MAX_RESUMEN_LISTA),
     pedido:       { hay: pedido.hay === true, descripcion: _txt(pedido.descripcion), importe: _num(pedido.importe_eur) },
