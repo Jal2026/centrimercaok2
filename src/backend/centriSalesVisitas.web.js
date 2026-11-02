@@ -1,8 +1,13 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Visitas (Wix Velo)
  * Archivo:  backend/centriSalesVisitas.web.js
- * VERSION:  1.1.3
- * FECHA:    26 Octubre 2026
+ * VERSION:  1.2.0
+ * FECHA:    2 Noviembre 2026
+ *
+ * v1.2.0 — 2 NOV 2026 · ACCESO EN DOS NIVELES (Jal). Único cambio, en
+ *   _reconocerComercial() y F_EQUIPO: COPIA LITERAL del bloque de
+ *   centriSalesClientes.web.js 1.5.0 (casilla «App Ventas» de la ficha de
+ *   `equipo`, además del rol). Se sube junto con clientes 1.5.0 y avisos 1.1.0.
  *
  * v1.1.3 — 26 OCT 2026 · centriSalesVisitasHoy acepta { dia: 'AAAA-MM-DD' }
  *   (Jal: ir a otro día desde el calendario del inicio). Sin dia, o con el de
@@ -97,7 +102,7 @@ import { webMethod, Permissions } from 'wix-web-module';
 import wixData from 'wix-data';
 import { currentMember } from 'wix-members-backend';
 
-const VERSION = '1.1.3';
+const VERSION = '1.2.0';
 const TAG = `[CentriSalesVisitas][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -148,7 +153,8 @@ const F_EQUIPO = {
   nombre: 'nombre',
   rol:    'rol',
   imagen: 'imagen',
-  email:  'email'
+  email:  'email',
+  appVentas: 'appVentas'   // 2-nov-2026: Booleano «App Ventas», creado por API (leído: BOOLEAN)
 };
 
 // ── Coordenadas — COPIA LITERAL de centriSalesClientes.web.js v1.2.0 ──
@@ -188,8 +194,10 @@ function _imgUrl(uri) {
 /**
  * Reconoce al comercial que llama. Exige:
  *   1. sesión de miembro;
- *   2. el rol ROL_AUTORIZADO;
- *   3. su email de acceso en UNA sola ficha de `equipo`.
+ *   2. el rol ROL_AUTORIZADO (nivel 1: lo pone a mano el administrador);
+ *   3. su email de acceso en UNA sola ficha de `equipo`;
+ *   4. (2-nov-2026) la casilla «App Ventas» de esa ficha activada (nivel 2: se
+ *      activa y desactiva desde el panel de CENTRIX). Sin marcar = sin acceso.
  *
  * Devuelve { ok:true, memberId, email, comercial:{ id, nombre, rol, foto } }
  * o { ok:false, error }.
@@ -284,6 +292,13 @@ async function _reconocerComercial() {
     }
 
     const it = coinciden[0];
+
+    // 2-nov-2026 — Nivel 2: casilla «App Ventas» de la ficha, activada desde
+    // el panel de CENTRIX. Solo vale true: vacía o false = sin acceso.
+    if (it[F_EQUIPO.appVentas] !== true) {
+      console.warn(`${TAG} acceso DENEGADO: email=${email} sin «App Ventas» activado en ${C_EQUIPO}`);
+      return { ok: false, error: 'Tu acceso a la app no está activado.' };
+    }
     return {
       ok: true,
       memberId,
