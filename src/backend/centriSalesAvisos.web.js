@@ -1,8 +1,19 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRI SALES · Avisos de la empresa (Wix Velo)
  * Archivo:  backend/centriSalesAvisos.web.js
- * VERSION:  1.0.0
- * FECHA:    26 Octubre 2026
+ * VERSION:  1.1.0
+ * FECHA:    2 Noviembre 2026
+ *
+ * v1.1.0 — 2 NOV 2026 · Dos cambios (Jal):
+ *   1. ACCESO EN DOS NIVELES: _reconocerComercial() y F_EQUIPO, COPIA
+ *      LITERAL del bloque de centriSalesClientes.web.js 1.5.0 (casilla «App
+ *      Ventas» de la ficha de `equipo`, además del rol). Se sube junto con
+ *      clientes 1.5.0 y visitas 1.2.0.
+ *   2. DESTINATARIOS: el panel de CENTRIX ya escribe en `destinatarios` los
+ *      _id de las fichas de `equipo` a las que va el aviso. Vacío = todos.
+ *      Con valores, el aviso solo lo ve el comercial cuya ficha esté en la
+ *      lista (acceso.comercial.id). La respuesta no cambia: la app 1.0.11 no
+ *      se toca.
  *
  * v1.0.0 — 26 OCT 2026 · Primera versión (Jal). Mensajes que la empresa
  *   cuelga para los comerciales («Atención, no habrá tomates cherry hasta el
@@ -21,8 +32,8 @@
  *                 la app lo vuelve a marcar como no visto.
  *
  * Caducidad: un aviso con `hasta` se ve HASTA ese día incluido (Europe/Madrid).
- * `destinatarios`: SIN USO en esta versión. Todo aviso activo lo ven todos.
- *   Más adelante: clusters o emails de comerciales.
+ * `destinatarios` (v1.1.0): _id de fichas de `equipo`. Vacío = lo ven todos;
+ *   con valores, solo esos comerciales.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * PROCEDENCIA (no inventada)
@@ -39,8 +50,10 @@
  * COLECCIÓN CentriSalesAvisos — field keys
  * ───────────────────────────────────────────────────────────────────────────
  *   mensaje (Texto) · activo (Booleano) · hasta (Fecha, opcional) ·
- *   destinatarios (Etiquetas, sin uso)
- *   Permisos: solo administrador. La lee este backend con suppressAuth.
+ *   destinatarios (Etiquetas: _id de fichas de `equipo`; vacío = todos)
+ *   La lee este backend con suppressAuth.
+ *   ⚠️ Permisos reales, leídos por API el 2-nov-2026: miembros del sitio para
+ *   leer, crear, editar y borrar (no «solo administrador» como se pidió).
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -48,7 +61,7 @@ import { webMethod, Permissions } from 'wix-web-module';
 import wixData from 'wix-data';
 import { currentMember } from 'wix-members-backend';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const TAG = `[CentriSalesAvisos][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -57,7 +70,7 @@ const F_AVISOS = {
   mensaje:       'mensaje',
   activo:        'activo',
   hasta:         'hasta',
-  destinatarios: 'destinatarios'   // sin uso en v1.0.0
+  destinatarios: 'destinatarios'   // v1.1.0: _id de fichas de `equipo`; vacío = todos
 };
 const LIMITE_AVISOS = 50;
 const MAX_MENSAJE = 1000;
@@ -79,7 +92,8 @@ const F_EQUIPO = {
   nombre: 'nombre',
   rol:    'rol',
   imagen: 'imagen',
-  email:  'email'
+  email:  'email',
+  appVentas: 'appVentas'   // 2-nov-2026: Booleano «App Ventas», creado por API (leído: BOOLEAN)
 };
 
 function safeErr(e) {
@@ -105,8 +119,10 @@ function _imgUrl(uri) {
 /**
  * Reconoce al comercial que llama. Exige:
  *   1. sesión de miembro;
- *   2. el rol ROL_AUTORIZADO;
- *   3. su email de acceso en UNA sola ficha de `equipo`.
+ *   2. el rol ROL_AUTORIZADO (nivel 1: lo pone a mano el administrador);
+ *   3. su email de acceso en UNA sola ficha de `equipo`;
+ *   4. (2-nov-2026) la casilla «App Ventas» de esa ficha activada (nivel 2: se
+ *      activa y desactiva desde el panel de CENTRIX). Sin marcar = sin acceso.
  *
  * Devuelve { ok:true, memberId, email, comercial:{ id, nombre, rol, foto } }
  * o { ok:false, error }.
@@ -201,6 +217,13 @@ async function _reconocerComercial() {
     }
 
     const it = coinciden[0];
+
+    // 2-nov-2026 — Nivel 2: casilla «App Ventas» de la ficha, activada desde
+    // el panel de CENTRIX. Solo vale true: vacía o false = sin acceso.
+    if (it[F_EQUIPO.appVentas] !== true) {
+      console.warn(`${TAG} acceso DENEGADO: email=${email} sin «App Ventas» activado en ${C_EQUIPO}`);
+      return { ok: false, error: 'Tu acceso a la app no está activado.' };
+    }
     return {
       ok: true,
       memberId,
@@ -269,12 +292,20 @@ export const centriSalesAvisos = webMethod(
         .find(AUTH);
 
       const hoy = _diaMadrid(new Date());
+      const yo = _txt(acceso.comercial && acceso.comercial.id);   // v1.1.0
       const avisos = [];
       (res.items || []).forEach((it) => {
         const mensaje = _txt(it[F_AVISOS.mensaje]).slice(0, MAX_MENSAJE);
         if (!mensaje) return;
         const hasta = _diaHasta(it[F_AVISOS.hasta]);
         if (hasta && hasta < hoy) return;   // caducado
+        // v1.1.0 — destinatarios: vacío = todos; con valores, solo esas fichas.
+        // Un texto suelto (no lista) cuenta como un destinatario: nunca se
+        // convierte en «todos» un aviso que iba a una persona.
+        const brutoPara = it[F_AVISOS.destinatarios];
+        const para = (Array.isArray(brutoPara) ? brutoPara : (_txt(brutoPara) ? [brutoPara] : []))
+          .map(_txt).filter(Boolean);
+        if (para.length > 0 && para.indexOf(yo) < 0) return;
         const creado = _fecha(it._createdDate);
         const editado = _fecha(it._updatedDate) || creado;
         avisos.push({
