@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>CENTRIMERCA · App de Ventas</title>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     CENTRIMERCA — Panel de la App de Ventas · v1.0.0 · 2 Nov 2026
+
+     REQUIERE: backend/centriSalesPanel.web.js v1.0.0 + CentriSalesPanel.page.js v1.0.0
+     ELEMENTO:  #htmlPanelVentas (HtmlComponent)   ← confirma el Element ID
+
+     Cuatro apartados (Jal, 2-nov-2026):
+       1. Usuarios   — en primer plano, los que tienen la app activada. La
+                       lista del equipo solo se abre para dar de alta.
+       2. Actividad  — visitas con todas sus variables, próximas citas y
+                       seguimientos vencidos.
+       3. Mensajes   — avisos de la «i» de la app, a todos o a comerciales
+                       concretos.
+       4. Análisis   — barómetro (positivas, negativas, oportunidades,
+                       seguimiento, vencidos, reuniones) del equipo y de cada
+                       comercial, y lectura del periodo con IA.
+
+     ⚠️ ES UN IFRAME. Habla por postMessage, no por atributos (patrón del
+        Gestor de equipo v1.0.5).
+     ⚠️ EL ACCESO NO LO DECIDE ESTE ARCHIVO: lo decide _exigirAdmin() en el
+        backend contra CentriAdmins.
+
+     DISEÑO Y CABLEADO: los del Gestor de equipo v1.0.5 (paleta #006166, Bai
+     Jamjuree, secciones .sec, filas .res-item, toasts, gate, resize).
+     Etiquetas de resultados, interés, objeciones, alertas y responsables: las
+     de la app (centriSales.js 1.0.11), para que el panel diga lo mismo que ve
+     el comercial.
+     ═══════════════════════════════════════════════════════════════════════ -->
+
+<link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f2f5f4;--panel:#fff;--panel2:#f7faf9;--panel3:#e9efee;
+  --line:#dde6e5;--line2:#cbd8d7;--line3:#b6c7c6;
+  --fg:#12201f;--fg2:#3a4b49;--muted:#6b7a78;--muted2:#9aa8a6;
+  --accent:#006166;--accent2:#00494d;
+  --accent-dim:rgba(0,97,102,.06);--accent-light:rgba(0,97,102,.14);
+  --hi:#b8632a;--hi-dim:rgba(184,99,42,.08);--hi-light:rgba(184,99,42,.16);
+  --green:#2b7a4b;--red:#c0504d;--amber:#a8790f;
+  --font:'Bai Jamjuree',sans-serif;--shadow:0 1px 4px rgba(0,0,0,.06);--r:8px
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--fg);font-family:var(--font);font-size:13px;line-height:1.5}
+.shell{display:flex;flex-direction:column;min-height:100vh}
+
+.hd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel);border-top:3px solid var(--accent);flex-wrap:wrap}
+.hd-title{font-size:15px;font-weight:700;color:var(--accent)}
+.hd-sep{color:var(--muted2)}.hd-sub{font-size:12px;color:var(--fg2)}
+
+.status-bar{display:flex;gap:14px;padding:7px 16px;background:var(--accent-dim);border-bottom:1px solid var(--accent-light);font-size:11px;color:var(--accent);flex-wrap:wrap}
+.sb-item{display:flex;align-items:center;gap:5px}
+.sb-dot{width:5px;height:5px;border-radius:50%;background:var(--hi);opacity:.9}
+
+/* Pestañas */
+.tabs{display:flex;gap:4px;padding:10px 16px 0;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tab{padding:9px 16px;border:1px solid transparent;border-bottom:none;border-radius:var(--r) var(--r) 0 0;background:none;font-family:var(--font);font-size:13.5px;font-weight:600;color:var(--muted);cursor:pointer;margin-bottom:-1px}
+.tab:hover{color:var(--accent)}
+.tab.on{background:var(--bg);border-color:var(--line);color:var(--accent)}
+
+.body{flex:1;padding:16px;display:flex;flex-direction:column;gap:14px}
+.vista{display:none;flex-direction:column;gap:14px}
+.vista.on{display:flex}
+.split{display:grid;grid-template-columns:minmax(340px,1fr) minmax(420px,1.15fr);gap:14px;align-items:start}
+@media (max-width:1000px){.split{grid-template-columns:1fr}}
+.split>*{min-width:0}
+.dos{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:760px){.dos{grid-template-columns:1fr}}
+.dos>*{min-width:0}
+@media (max-width:620px){
+  .body{padding:10px;gap:10px}
+  .sec{padding:11px}
+  .hd{padding:10px 11px}
+  .status-bar{padding:7px 11px;gap:9px}
+  .tabs{padding:8px 8px 0}
+  .tab{padding:8px 10px;font-size:12.5px}
+  .ft{padding:10px 11px}
+}
+
+.sec{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;box-shadow:var(--shadow)}
+.sec h3{font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.8px;margin:0 0 4px}
+.sec h4{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px}
+.sec .hint{font-size:11px;color:var(--muted);margin:0 0 10px;line-height:1.45}
+
+textarea,select,input[type="text"],input[type="date"]{width:100%;background:var(--panel2);color:var(--fg);border:1px solid var(--line2);border-radius:var(--r);padding:9px 11px;font-family:var(--font);font-size:13px;outline:none;resize:vertical;transition:border-color .2s;min-width:0;max-width:100%}
+textarea:focus,select:focus,input:focus{border-color:var(--accent)}
+textarea::placeholder,input::placeholder{color:var(--muted2)}
+.fld{margin-bottom:12px;min-width:0}
+.fld label,.lbl{display:block;font-size:11px;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.4px}
+.spacer{flex:1}
+
+.btn{padding:11px 18px;border:1px solid var(--accent);border-radius:var(--r);background:var(--accent);color:#fff;font-family:var(--font);font-size:14px;font-weight:600;cursor:pointer;transition:background .15s}
+.btn:hover:not(:disabled){background:var(--accent2)}
+.btn:disabled{opacity:.5;cursor:default}
+.btn-2{background:var(--panel2);color:var(--fg2);border-color:var(--line2)}
+.btn-2:hover:not(:disabled){background:var(--panel3)}
+.btn-sm{padding:8px 13px;font-size:12.5px}
+.btn-danger{background:var(--panel2);color:var(--red);border-color:var(--line2)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.link{color:var(--accent);font-size:12px;text-decoration:none;font-weight:600;cursor:pointer;background:none;border:none;font-family:var(--font);padding:0}
+.link:hover{text-decoration:underline}
+
+/* Filas (las del Gestor de equipo) */
+.lista{max-height:70vh;min-height:120px;overflow-y:auto;padding-right:2px}
+.res-item{display:flex;align-items:center;gap:11px;padding:9px 11px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel2);margin-bottom:6px}
+.res-item.click{cursor:pointer}
+.res-item.click:hover{border-color:var(--line3)}
+.res-item.sel{border-color:var(--accent);background:var(--accent-dim)}
+.res-thumb{width:44px;height:44px;border-radius:50%;object-fit:cover;object-position:top;background:var(--panel3);flex:none}
+.res-thumb.ph{display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--muted2);font-weight:700}
+.res-main{flex:1;min-width:0}
+.res-title{font-size:14px;color:var(--fg);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.res-sub{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
+.res-side{flex:none;text-align:right;font-size:11.5px;color:var(--fg2)}
+.res-empty{padding:16px;text-align:center;color:var(--muted);font-size:12px}
+.aviso-ficha{font-size:11px;color:var(--red);margin-top:2px}
+
+/* Interruptor redondo (el círculo «visible» del Gestor de equipo) */
+.flag{width:27px;height:27px;border-radius:50%;border:1px solid var(--line2);background:var(--panel);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;cursor:pointer;color:var(--muted2);flex:none;font-family:var(--font)}
+.flag.on-act{background:rgba(43,122,75,.1);border-color:rgba(43,122,75,.3);color:var(--green)}
+.flag:disabled{opacity:.5;cursor:default}
+
+/* Filtros */
+.filtros{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:10px}
+.filtros .cuenta{grid-column:1/-1}
+@media (max-width:1180px){.filtros{grid-template-columns:1fr 1fr}}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.chip{padding:5px 11px;border:1px solid var(--line2);border-radius:999px;background:var(--panel2);font-family:var(--font);font-size:12px;color:var(--fg2);cursor:pointer}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.periodo{display:grid;grid-template-columns:1fr 1fr;gap:8px;max-width:360px}
+
+/* Píldoras y situaciones */
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;background:var(--panel3);color:var(--fg2);margin:0 4px 4px 0;white-space:nowrap}
+.pill.res{background:var(--accent-light);color:var(--accent2)}
+.sit{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border-radius:999px;font-size:10.5px;font-weight:700;margin-left:3px}
+.sit-positiva{background:rgba(43,122,75,.12);color:var(--green)}
+.sit-negativa{background:rgba(192,80,77,.12);color:var(--red)}
+.sit-oportunidad{background:var(--hi-light);color:var(--hi)}
+.sit-seguimiento{background:var(--accent-light);color:var(--accent)}
+.sit-vencido{background:var(--red);color:#fff}
+
+/* Detalle de visita */
+.det-h{font-size:17px;font-weight:700;color:var(--fg)}
+.det-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:6px 12px;margin-top:6px}
+@media (max-width:620px){.kv{grid-template-columns:1fr}}
+.kv dt{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;padding-top:2px}
+.kv dd{font-size:13px;color:var(--fg)}
+.caja{padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel2);font-size:13px;color:var(--fg2);line-height:1.55}
+.caja-ia{border-style:dashed;border-color:var(--hi-light);background:var(--hi-dim)}
+.caja-ia b{color:var(--hi)}
+details.trans summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:12px;margin-top:12px}
+details.trans .caja{margin-top:6px;white-space:pre-wrap}
+
+/* Barómetro */
+.kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
+.kpi{border:1px solid var(--line);border-radius:var(--r);background:var(--panel2);padding:10px 12px;cursor:default}
+.kpi .n{font-size:24px;font-weight:700;line-height:1.1;color:var(--fg)}
+.kpi .t{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-top:3px}
+.kpi.positiva .n{color:var(--green)} .kpi.negativa .n{color:var(--red)}
+.kpi.oportunidad .n{color:var(--hi)} .kpi.seguimiento .n{color:var(--accent)} .kpi.vencido .n{color:var(--red)}
+.tabla{width:100%;border-collapse:collapse;font-size:12.5px}
+.tabla th{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;text-align:right;padding:6px 8px;border-bottom:1px solid var(--line);font-weight:600}
+.tabla th:first-child,.tabla td:first-child{text-align:left}
+.tabla td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;color:var(--fg2)}
+.tabla tr.click{cursor:pointer}
+.tabla tr.click:hover td{background:var(--panel2)}
+.tabla tr.sel td{background:var(--accent-dim)}
+.tabla-wrap{overflow-x:auto}
+.barras{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px 18px}
+.barra{display:grid;grid-template-columns:minmax(0,1fr) 34px;gap:8px;align-items:center;margin-bottom:5px;font-size:12px;color:var(--fg2)}
+.barra .b{height:8px;border-radius:4px;background:var(--accent-light);position:relative;overflow:hidden;margin-top:3px}
+.barra .b i{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:4px}
+.barra .v{text-align:right;font-weight:600;color:var(--fg)}
+.lectura{font-size:13.5px;line-height:1.6;color:var(--fg2)}
+.lectura h2{font-size:13px;color:var(--accent);text-transform:uppercase;letter-spacing:.5px;margin:16px 0 6px}
+.lectura h2:first-child{margin-top:0}
+.lectura ul{padding-left:18px;margin:4px 0}
+.lectura p{margin:4px 0}
+.nota-ia{font-size:11px;color:var(--muted);margin-top:10px}
+
+/* Selector del equipo (alta) */
+.capa{display:none;position:fixed;inset:0;background:rgba(18,32,31,.35);z-index:50;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto}
+.capa.on{display:flex}
+.capa .sec{width:100%;max-width:560px}
+
+.ft{padding:10px 16px;border-top:1px solid var(--line);background:var(--panel);font-size:11px;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap}
+#toast{display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--fg);color:#fff;padding:9px 16px;border-radius:var(--r);font-size:12.5px;z-index:99;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+.gate{display:none;margin:16px;padding:14px;border:1px solid var(--red);border-radius:var(--r);background:rgba(192,80,77,.06);color:var(--red);font-size:13px;line-height:1.55}
+.cargando{color:var(--muted);font-size:12px;padding:10px 0}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <div class="hd">
+    <span class="hd-title">CENTRIMERCA</span>
+    <span class="hd-sep">·</span>
+    <span class="hd-sub">App de Ventas</span>
+  </div>
+
+  <div class="status-bar">
+    <span class="sb-item"><span class="sb-dot"></span><span id="sbEstado">Cargando…</span></span>
+    <span class="sb-item"><span class="sb-dot"></span><span id="sbUsuarios">— usuarios con la app</span></span>
+  </div>
+
+  <div class="gate" id="gate"></div>
+
+  <div id="mainBody">
+    <div class="tabs" role="tablist">
+      <button class="tab on" data-tab="usuarios">Usuarios</button>
+      <button class="tab" data-tab="actividad">Actividad</button>
+      <button class="tab" data-tab="mensajes">Mensajes</button>
+      <button class="tab" data-tab="analisis">Análisis</button>
+    </div>
+
+    <div class="body">
+
+      <!-- ── 1. USUARIOS ─────────────────────────────────────────────── -->
+      <div class="vista on" id="v-usuarios">
+        <div class="sec">
+          <h3>Usuarios de la app</h3>
+          <p class="hint">Comerciales con la app activada. El círculo verde la desactiva al momento. Para entrar, además, necesitan el rol de acceso que asigna el administrador.</p>
+          <div class="lista" id="listaUsuarios"><div class="cargando">Cargando…</div></div>
+          <div class="actions">
+            <button class="btn btn-sm" id="btnAlta">+ Dar de alta</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 2. ACTIVIDAD ────────────────────────────────────────────── -->
+      <div class="vista" id="v-actividad">
+        <div class="sec">
+          <h3>Próximas citas y seguimientos vencidos</h3>
+          <div id="proximas"><div class="cargando">Cargando…</div></div>
+        </div>
+
+        <div class="split">
+          <div class="sec">
+            <h3>Visitas</h3>
+            <div class="chips" id="chipsA"></div>
+            <div class="periodo">
+              <div class="fld"><label for="aDesde">Desde</label><input type="date" id="aDesde"></div>
+              <div class="fld"><label for="aHasta">Hasta</label><input type="date" id="aHasta"></div>
+            </div>
+            <div class="filtros">
+              <select id="aComercial" title="Comercial"><option value="">Todos los comerciales</option></select>
+              <select id="aResultado" title="Resultado"><option value="">Todos los resultados</option></select>
+              <select id="aSituacion" title="Situación"><option value="">Todas las situaciones</option></select>
+              <span class="hint cuenta" id="aCuenta" style="margin:0"></span>
+            </div>
+            <div class="lista" id="listaVisitas"></div>
+          </div>
+
+          <div class="sec" id="detalle">
+            <h3>Informe de la visita</h3>
+            <p class="hint">Elige una visita de la lista.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 3. MENSAJES ─────────────────────────────────────────────── -->
+      <div class="vista" id="v-mensajes">
+        <div class="split">
+          <div class="sec">
+            <h3 id="mTitulo">Nuevo aviso</h3>
+            <p class="hint">Sale en la «i» del inicio de la app. Lo ven todos o solo los comerciales que elijas.</p>
+            <div class="fld">
+              <label for="mTexto">Mensaje</label>
+              <textarea id="mTexto" rows="4" maxlength="1000" placeholder="Atención: no habrá tomates cherry hasta el 15 de diciembre."></textarea>
+            </div>
+            <div class="fld">
+              <span class="lbl">Para</span>
+              <div class="chips" id="mPara">
+                <button class="chip on" data-para="todos">Todos</button>
+                <button class="chip" data-para="elegir">Elegir comerciales</button>
+              </div>
+              <div id="mElegidos"></div>
+            </div>
+            <div class="fld" style="max-width:220px">
+              <label for="mHasta">Visible hasta (opcional)</label>
+              <input type="date" id="mHasta">
+            </div>
+            <div class="actions">
+              <button class="btn btn-sm" id="mGuardar">Publicar</button>
+              <button class="btn btn-sm btn-2" id="mCancelar" style="display:none">Cancelar</button>
+            </div>
+          </div>
+
+          <div class="sec">
+            <h3>Avisos</h3>
+            <div class="lista" id="listaAvisos"><div class="cargando">Cargando…</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 4. ANÁLISIS ─────────────────────────────────────────────── -->
+      <div class="vista" id="v-analisis">
+        <div class="sec">
+          <h3>Barómetro</h3>
+          <div class="chips" id="chipsN"></div>
+          <div class="periodo">
+            <div class="fld"><label for="nDesde">Desde</label><input type="date" id="nDesde"></div>
+            <div class="fld"><label for="nHasta">Hasta</label><input type="date" id="nHasta"></div>
+          </div>
+          <div id="kpis"><div class="cargando">Cargando…</div></div>
+          <h4>Por comercial</h4>
+          <p class="hint">Toca un comercial para ver su detalle y preparar su lectura.</p>
+          <div class="tabla-wrap" id="porComercial"></div>
+        </div>
+
+        <div class="sec">
+          <h3 id="dTitulo">Detalle · Todo el equipo</h3>
+          <div class="barras" id="desglose"></div>
+        </div>
+
+        <div class="sec">
+          <h3 id="lTitulo">Lectura del periodo · Todo el equipo</h3>
+          <p class="hint">La prepara la IA con el barómetro y los informes del periodo. Describe la situación de trabajo; nunca el ánimo de las personas.</p>
+          <div class="actions" style="margin-top:0">
+            <button class="btn btn-sm" id="btnLectura">Preparar lectura</button>
+          </div>
+          <div id="lectura"></div>
+        </div>
+
+        <div class="sec">
+          <h3>Informes anteriores</h3>
+          <p class="hint">Las visitas enviadas antes del 2 de noviembre no tienen «lo que el cliente valora» ni las «dudas de trabajo». Se pueden completar desde la grabación transcrita; lo demás del informe no se toca.</p>
+          <div class="actions" style="margin-top:0">
+            <button class="btn btn-sm btn-2" id="btnReinterpretar">Completar informes anteriores</button>
+            <span class="hint" id="reEstado" style="margin:0"></span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="ft">
+    <span>Panel App de Ventas v1.0.0</span>
+  </div>
+
+</div>
+
+<!-- Selector del equipo para dar de alta (bajo demanda) -->
+<div class="capa" id="capaAlta">
+  <div class="sec">
+    <h3>Dar de alta en la app</h3>
+    <p class="hint">Personas del equipo sin la app activada.</p>
+    <div class="fld"><input type="text" id="buscaAlta" placeholder="Buscar por nombre o rol…"></div>
+    <div class="lista" id="listaAlta" style="max-height:55vh"><div class="cargando">Cargando…</div></div>
+    <div class="actions"><span class="spacer"></span><button class="btn btn-sm btn-2" id="cerrarAlta">Cerrar</button></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ═════════════════════════════════════════════════════════════════════════
+ * ETIQUETAS — las de la app (centriSales.js 1.0.11)
+ * ═════════════════════════════════════════════════════════════════════════ */
+var RESULTADOS = {
+  pedido:'Pedido', ventas:'Ventas', negociacion:'Negociación', seguimiento:'Seguimiento',
+  administrativa:'Administrativa', incidencia:'Incidencia', presentacion:'Presentación',
+  cortesia:'Cortesía', sin_interes:'Sin interés', no_atendido:'No atendido', otro:'Otro'
+};
+var ETIQUETAS = {
+  interes: { alto:'Alto', medio:'Medio', bajo:'Bajo', indeterminado:'Sin determinar' },
+  objeciones: { precio:'Precio', calidad:'Calidad', mermas:'Mermas', entrega:'Entrega', servicio:'Servicio', condiciones_pago:'Condiciones de pago', competencia:'Competencia', otra:'Otra' },
+  alertas: { riesgo_impago:'Riesgo de impago', queja:'Queja', riesgo_perdida:'Riesgo de pérdida', descuento_solicitado:'Pide descuento', oportunidad:'Oportunidad' },
+  responsable: { comercial:'Comercial', direccion_comercial:'Dirección comercial', cobros:'Cobros', logistica:'Logística', calidad:'Calidad', otro:'Otro' },
+  // centriSalesLab.web.js 1.6.0
+  valora: { calidad:'Calidad', precio:'Precio', servicio:'Servicio', entrega:'Entrega', trato:'Trato', otro:'Otro' },
+  dudasTrabajo: { precio:'Precio', condiciones:'Condiciones', stock:'Stock', producto:'Producto', tramite:'Cómo tramitar algo', otra:'Otra' },
+  // CATEGORIAS_TICKET de centriSales.js 1.0.11 (solo los rótulos)
+  ticket: { combustible:'Combustible', parking:'Parking', peaje:'Peaje', comida:'Comida', alojamiento:'Alojamiento', otro:'Otro gasto' }
+};
+var SITUACIONES = [
+  { k:'positiva',    label:'Positiva',             corto:'+' },
+  { k:'negativa',    label:'Negativa',             corto:'−' },
+  { k:'oportunidad', label:'Oportunidad',          corto:'★' },
+  { k:'seguimiento', label:'Seguimiento',          corto:'↻' },
+  { k:'vencido',     label:'Seguimiento vencido',  corto:'!' }
+];
+function et(campo, v){ return (ETIQUETAS[campo] && ETIQUETAS[campo][v]) || v || '—'; }
+function res(v){ return RESULTADOS[v] || v || '—'; }
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * ESTADO
+ * ═════════════════════════════════════════════════════════════════════════ */
+var HOY = '';
+var U = { usuarios: [], equipo: null, ocupado: {} };
+var A = { desde:'', hasta:'', comercialId:'', resultado:'', situacion:'', visitas:[], selId:'', cargada:false };
+var M = { avisos: [], editId:'', para:'todos', elegidos:{} };
+var N = { desde:'', hasta:'', b:null, ver:'', lecturas:{} };
+var reEnCurso = false;
+var reCortes = 0;                // lotes cortados seguidos al completar informes
+
+var $ = function(id){ return document.getElementById(id); };
+
+function toast(msg, ms){
+  var t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  setTimeout(function(){ t.style.display = 'none'; }, ms || 2600);
+}
+function send(type, data){
+  parent.postMessage(Object.assign({type:type}, data || {}), '*');
+}
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+function bloquear(motivo){
+  $('mainBody').style.display = 'none';
+  document.querySelector('.status-bar').style.display = 'none';
+  var g = $('gate');
+  g.style.display = 'block';
+  g.textContent = motivo || 'No tienes acceso al panel de la app de ventas.';
+}
+function sumarDias(dia, n){
+  var d = new Date(dia + 'T12:00:00Z');
+  return new Date(d.getTime() + n*86400000).toISOString().slice(0,10);
+}
+function fechaCorta(dia){
+  if (!dia) return '';
+  var p = dia.split('-'); return p[2] + '/' + p[1];
+}
+function fechaLarga(dia){
+  if (!dia) return '';
+  var p = dia.split('-'); return p[2] + '/' + p[1] + '/' + p[0];
+}
+function euros(n){
+  if (n===null || n===undefined || n==='') return '';
+  return Number(n).toLocaleString('es-ES', { style:'currency', currency:'EUR' });
+}
+function inicial(nombre){ return esc(String(nombre||'?').trim().charAt(0).toUpperCase() || '?'); }
+function foto(url, nombre){
+  return url ? '<img class="res-thumb" src="'+esc(url)+'" alt="">' : '<div class="res-thumb ph">'+inicial(nombre)+'</div>';
+}
+function mapa(lat, lon){
+  if (lat===null || lon===null || lat===undefined || lon===undefined) return '';
+  return '<a class="link" target="_blank" rel="noopener" href="https://www.google.com/maps?q='+encodeURIComponent(lat+','+lon)+'">Ver en el mapa</a>';
+}
+function pills(lista, campo){
+  if (!lista || !lista.length) return '<span class="hint" style="margin:0">—</span>';
+  return lista.map(function(v){ return '<span class="pill">'+esc(et(campo, v))+'</span>'; }).join('');
+}
+function sits(s){
+  if (!s) return '';
+  return SITUACIONES.filter(function(x){ return s[x.k]; }).map(function(x){
+    return '<span class="sit sit-'+x.k+'" title="'+esc(x.label)+'">'+x.corto+'</span>';
+  }).join('');
+}
+function nombreUsuario(id){
+  for (var i=0;i<U.usuarios.length;i++){ if (U.usuarios[i].id===id) return U.usuarios[i].nombre; }
+  return '';
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * PESTAÑAS
+ * ═════════════════════════════════════════════════════════════════════════ */
+var cargadas = { usuarios:true, actividad:false, mensajes:false, analisis:false };
+function irA(tab){
+  var bs = document.querySelectorAll('.tab');
+  for (var i=0;i<bs.length;i++){ bs[i].classList.toggle('on', bs[i].getAttribute('data-tab')===tab); }
+  var vs = document.querySelectorAll('.vista');
+  for (var j=0;j<vs.length;j++){ vs[j].classList.toggle('on', vs[j].id==='v-'+tab); }
+  if (!cargadas[tab] && HOY){
+    cargadas[tab] = true;
+    if (tab==='actividad'){ pedirVisitas(); send('proximas', {}); }
+    if (tab==='mensajes'){ send('avisos', {}); }
+    if (tab==='analisis'){ pedirBarometro(); }
+  }
+  notifyHeight();
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * 1. USUARIOS
+ * ═════════════════════════════════════════════════════════════════════════ */
+function renderUsuarios(){
+  $('sbUsuarios').textContent = U.usuarios.length + (U.usuarios.length===1 ? ' usuario con la app' : ' usuarios con la app');
+  var h = '';
+  if (!U.usuarios.length){
+    h = '<div class="res-empty">Nadie tiene la app activada. Usa «Dar de alta».</div>';
+  }
+  U.usuarios.forEach(function(u){
+    var ult = u.ultimaVisita ? ('Última visita: ' + fechaLarga(u.ultimaVisita.dia) + ' ' + esc(u.ultimaVisita.hora) + ' · ' + esc(u.ultimaVisita.cliente)) : 'Sin visitas todavía';
+    h += '<div class="res-item">' + foto(u.foto, u.nombre) +
+      '<div class="res-main"><div class="res-title">'+esc(u.nombre)+'</div>' +
+      '<div class="res-sub">'+esc([u.rol, u.email].filter(Boolean).join(' · '))+'</div>' +
+      '<div class="res-sub">'+ult+'</div>' +
+      (u.problema ? '<div class="aviso-ficha">⚠ '+esc(u.problema)+'</div>' : '') +
+      '</div>' +
+      '<div class="res-side"><b>'+(u.reuniones30||0)+'</b><br><span class="hint" style="margin:0">reuniones<br>30 días</span></div>' +
+      '<button class="flag on-act" data-quitar="'+esc(u.id)+'" title="Desactivar la app"'+(U.ocupado[u.id]?' disabled':'')+'>✓</button>' +
+      '</div>';
+  });
+  $('listaUsuarios').innerHTML = h;
+  rellenarComerciales();
+  notifyHeight();
+}
+
+function renderAlta(){
+  if (!U.equipo){ $('listaAlta').innerHTML = '<div class="cargando">Cargando…</div>'; return; }
+  var q = $('buscaAlta').value.trim().toLowerCase();
+  var lista = U.equipo.filter(function(p){
+    if (p.appVentas) return false;
+    if (!q) return true;
+    return (p.nombre + ' ' + p.rol).toLowerCase().indexOf(q) >= 0;
+  });
+  var h = '';
+  if (!lista.length) h = '<div class="res-empty">No hay nadie más en el equipo para activar.</div>';
+  lista.forEach(function(p){
+    h += '<div class="res-item">' + foto(p.foto, p.nombre) +
+      '<div class="res-main"><div class="res-title">'+esc(p.nombre)+'</div>' +
+      '<div class="res-sub">'+esc([p.rol, p.email].filter(Boolean).join(' · '))+'</div>' +
+      (p.problema ? '<div class="aviso-ficha">⚠ '+esc(p.problema)+'</div>' : '') +
+      '</div>' +
+      '<button class="btn btn-sm" data-activar="'+esc(p.id)+'"'+(U.ocupado[p.id]?' disabled':'')+'>Activar</button>' +
+      '</div>';
+  });
+  $('listaAlta').innerHTML = h;
+}
+
+function cambiarApp(id, activo){
+  U.ocupado[id] = true;
+  renderUsuarios(); renderAlta();
+  send('activarApp', { id:id, activo:activo });
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * 2. ACTIVIDAD
+ * ═════════════════════════════════════════════════════════════════════════ */
+function chipsPeriodo(cont, alElegir){
+  var ops = [ ['Hoy',0], ['7 días',6], ['30 días',29], ['90 días',89] ];
+  $(cont).innerHTML = ops.map(function(o){ return '<button class="chip" data-dias="'+o[1]+'">'+o[0]+'</button>'; }).join('');
+  $(cont).addEventListener('click', function(e){
+    var b = e.target.closest('[data-dias]'); if (!b) return;
+    alElegir(sumarDias(HOY, -Number(b.getAttribute('data-dias'))), HOY);
+  });
+}
+function marcarChips(cont, desde, hasta){
+  var bs = $(cont).querySelectorAll('[data-dias]');
+  for (var i=0;i<bs.length;i++){
+    var on = hasta===HOY && desde===sumarDias(HOY, -Number(bs[i].getAttribute('data-dias')));
+    bs[i].classList.toggle('on', on);
+  }
+}
+function rellenarComerciales(){
+  var sel = $('aComercial'); var v = sel.value;
+  sel.innerHTML = '<option value="">Todos los comerciales</option>' + U.usuarios.map(function(u){
+    return '<option value="'+esc(u.id)+'">'+esc(u.nombre)+'</option>';
+  }).join('');
+  sel.value = v;
+}
+function pedirVisitas(){
+  A.desde = $('aDesde').value; A.hasta = $('aHasta').value;
+  A.comercialId = $('aComercial').value; A.resultado = $('aResultado').value; A.situacion = $('aSituacion').value;
+  marcarChips('chipsA', A.desde, A.hasta);
+  $('listaVisitas').innerHTML = '<div class="cargando">Cargando…</div>';
+  send('visitas', { desde:A.desde, hasta:A.hasta, comercialId:A.comercialId, resultado:A.resultado, situacion:A.situacion });
+}
+function renderVisitas(){
+  var h = '';
+  if (!A.visitas.length) h = '<div class="res-empty">No hay visitas con estos filtros.</div>';
+  A.visitas.forEach(function(v){
+    var titulo = v.estado==='enviada' ? res(v.resultado) : 'Sin informe';
+    h += '<div class="res-item click'+(v.id===A.selId?' sel':'')+'" data-visita="'+esc(v.id)+'">' +
+      '<div class="res-main"><div class="res-title">'+esc(v.cliente || 'Cliente sin indicar')+'</div>' +
+      '<div class="res-sub">'+fechaCorta(v.dia)+' '+esc(v.hora)+' · '+esc(v.comercial)+'</div>' +
+      '<div style="margin-top:4px"><span class="pill res">'+esc(titulo)+'</span>' +
+      (v.pedido && v.pedido.hay && v.pedido.importe!==null ? '<span class="pill">'+esc(euros(v.pedido.importe))+'</span>' : '') +
+      '</div></div>' +
+      '<div class="res-side">'+sits(v.situaciones)+'</div>' +
+      '</div>';
+  });
+  $('listaVisitas').innerHTML = h;
+  var env = A.visitas.filter(function(v){ return v.estado==='enviada'; }).length;
+  $('aCuenta').textContent = env + (env===1 ? ' visita enviada' : ' visitas enviadas');
+  notifyHeight();
+}
+function renderProximas(p){
+  if (!p || !p.ok){ $('proximas').innerHTML = '<div class="res-empty">'+esc(p ? p.error : 'Error')+'</div>'; return; }
+  function filas(lista, vacio){
+    if (!lista.length) return '<div class="res-empty" style="padding:8px">'+vacio+'</div>';
+    return lista.slice(0, 12).map(function(v){
+      return '<div class="res-item click" data-visita="'+esc(v.id)+'" style="padding:7px 10px">' +
+        '<div class="res-main"><div class="res-title" style="font-size:13px">'+fechaLarga(v.proxima.fecha)+' · '+esc(v.cliente)+'</div>' +
+        '<div class="res-sub">'+esc(v.proxima.descripcion)+' · '+esc(v.comercial)+(v.proxima.responsable && v.proxima.responsable!=='comercial' ? ' · '+esc(et('responsable', v.proxima.responsable)) : '')+'</div></div>' +
+        '</div>';
+    }).join('') + (lista.length>12 ? '<div class="hint">… y '+(lista.length-12)+' más.</div>' : '');
+  }
+  $('proximas').innerHTML = '<div class="dos">' +
+    '<div><h4 style="margin-top:0">Próximas citas ('+p.proximas.length+')</h4>'+filas(p.proximas, 'Ninguna cita próxima.')+'</div>' +
+    '<div><h4 style="margin-top:0;color:var(--red)">Vencidos ('+p.vencidas.length+')</h4>'+filas(p.vencidas, 'Ningún seguimiento vencido.')+'</div>' +
+    '</div>';
+  notifyHeight();
+}
+function renderDetalle(v){
+  var inf = v.informe || {};
+  var conf = Array.isArray(inf.confirmaciones) ? inf.confirmaciones : [];
+  var h = '<h3>Informe de la visita</h3>' +
+    '<div class="det-h">'+esc(v.cliente || 'Cliente sin indicar')+'</div>' +
+    '<div class="det-sub">'+fechaLarga(v.dia)+' · '+esc(v.hora)+' · '+esc(v.comercial)+' '+sits(v.situaciones)+'</div>';
+
+  if (v.estado!=='enviada'){
+    h += '<p class="hint" style="margin-top:10px">Marcó la llegada pero aún no ha enviado el informe.</p>';
+  } else {
+    h += '<dl class="kv">' +
+      '<dt>Resultado</dt><dd><span class="pill res">'+esc(res(v.resultado))+'</span></dd>' +
+      '<dt>Interés</dt><dd>'+esc(et('interes', v.interes))+'</dd>' +
+      '<dt>Pedido</dt><dd>'+(v.pedido.hay ? esc(v.pedido.descripcion || 'Sí') + (v.pedido.importe!==null ? ' · <b>'+esc(euros(v.pedido.importe))+'</b>' : '') : 'No')+'</dd>' +
+      '</dl>' +
+      '<h4>Resumen</h4><div class="caja">'+esc(inf.resumen || '—')+'</div>' +
+      '<dl class="kv" style="margin-top:12px">' +
+      '<dt>Productos</dt><dd>'+(v.productos.length ? v.productos.map(function(p){ return '<span class="pill">'+esc(p)+'</span>'; }).join('') : '—')+'</dd>' +
+      '<dt>Objeciones</dt><dd>'+pills(v.objeciones, 'objeciones')+'</dd>' +
+      '<dt>Alertas</dt><dd>'+pills(v.alertas, 'alertas')+'</dd>' +
+      '<dt>El cliente valora</dt><dd>'+pills(v.valora, 'valora')+'</dd>' +
+      '<dt>Dudas de trabajo</dt><dd>'+pills(v.dudasTrabajo, 'dudasTrabajo')+'</dd>' +
+      '<dt>Próxima acción</dt><dd>'+(v.proxima.descripcion ? esc(v.proxima.descripcion) + (v.proxima.fecha ? ' · <b>'+fechaLarga(v.proxima.fecha)+'</b>' : '') + (v.proxima.responsable ? ' · '+esc(et('responsable', v.proxima.responsable)) : '') : '—')+'</dd>' +
+      '</dl>';
+    if (v.sugerencia && v.sugerencia.descripcion){
+      h += '<h4>Sugerencia de la IA</h4><div class="caja caja-ia"><b>No lo ha dicho el comercial.</b> '+esc(v.sugerencia.descripcion)+(v.sugerencia.responsable ? ' · '+esc(et('responsable', v.sugerencia.responsable)) : '')+'</div>';
+    }
+    if (conf.length){
+      h += '<h4>Para confirmar</h4>' + conf.map(function(c){
+        var r = c.respuesta==='si' ? 'Sí' : (c.respuesta==='no' ? 'No' : 'Sin responder');
+        return '<div class="res-sub" style="white-space:normal">'+esc(c.pregunta)+' → <b>'+esc(r)+'</b></div>';
+      }).join('');
+    }
+    if (v.ticket){
+      h += '<h4>Ticket de gasto</h4><div class="caja">'+esc(et('ticket', v.ticket.categoria))+' · <b>'+esc(euros(v.ticket.total))+'</b>'+(v.ticket.comercio ? ' · '+esc(v.ticket.comercio) : '')+
+        (v.ticket.foto ? ' · <a class="link" target="_blank" rel="noopener" href="'+esc(v.ticket.foto)+'">Ver foto</a>' : '')+'</div>';
+    }
+  }
+  h += '<h4>Ubicación</h4><dl class="kv">' +
+    '<dt>Llegada</dt><dd>'+(v.llegada.hora ? esc(v.llegada.hora)+' · ' : '')+(mapa(v.llegada.lat, v.llegada.lon) || 'Sin ubicación')+'</dd>' +
+    '<dt>Envío del informe</dt><dd>'+(v.reporte.hora ? esc(v.reporte.hora)+' · ' : '')+(mapa(v.reporte.lat, v.reporte.lon) || 'Sin ubicación')+'</dd>' +
+    '</dl>';
+  if (v.transcripcion){
+    h += '<details class="trans"><summary>Lo que dictó el comercial'+(v.segundosAudio ? ' ('+Math.round(v.segundosAudio)+' s)' : '')+'</summary><div class="caja">'+esc(v.transcripcion)+'</div></details>';
+  }
+  $('detalle').innerHTML = h;
+  notifyHeight();
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * 3. MENSAJES
+ * ═════════════════════════════════════════════════════════════════════════ */
+function renderPara(){
+  var bs = $('mPara').querySelectorAll('[data-para]');
+  for (var i=0;i<bs.length;i++){ bs[i].classList.toggle('on', bs[i].getAttribute('data-para')===M.para); }
+  if (M.para!=='elegir'){ $('mElegidos').innerHTML = ''; notifyHeight(); return; }
+  var gente = U.usuarios.map(function(u){ return { id:u.id, nombre:u.nombre }; });
+  Object.keys(M.elegidos).forEach(function(id){
+    if (!gente.some(function(g){ return g.id===id; })) gente.push({ id:id, nombre:M.elegidos[id] || '(sin la app)' });
+  });
+  $('mElegidos').innerHTML = '<div class="chips" style="margin-top:6px">' + (gente.length ? gente.map(function(g){
+    return '<button class="chip'+(M.elegidos[g.id]!==undefined?' on':'')+'" data-elegir="'+esc(g.id)+'">'+esc(g.nombre)+'</button>';
+  }).join('') : '<span class="hint">No hay usuarios con la app.</span>') + '</div>';
+  notifyHeight();
+}
+function limpiarAviso(){
+  M.editId = ''; M.para = 'todos'; M.elegidos = {};
+  $('mTexto').value = ''; $('mHasta').value = '';
+  $('mTitulo').textContent = 'Nuevo aviso'; $('mGuardar').textContent = 'Publicar';
+  $('mCancelar').style.display = 'none';
+  renderPara();
+}
+function editarAviso(id){
+  var a = null;
+  for (var i=0;i<M.avisos.length;i++){ if (M.avisos[i].id===id){ a = M.avisos[i]; break; } }
+  if (!a) return;
+  M.editId = a.id;
+  $('mTexto').value = a.mensaje; $('mHasta').value = a.hasta || '';
+  M.elegidos = {};
+  a.destinatarios.forEach(function(d){ M.elegidos[d.id] = d.nombre; });
+  M.para = a.destinatarios.length ? 'elegir' : 'todos';
+  $('mTitulo').textContent = 'Editar aviso'; $('mGuardar').textContent = 'Guardar cambios';
+  $('mCancelar').style.display = '';
+  renderPara();
+  $('mTexto').focus();
+}
+function guardarAviso(extra){
+  var datos = Object.assign({
+    id: M.editId,
+    mensaje: $('mTexto').value.trim(),
+    hasta: $('mHasta').value,
+    activo: true,
+    destinatarios: M.para==='elegir' ? Object.keys(M.elegidos) : []
+  }, extra || {});
+  if (!datos.mensaje){ toast('Escribe el mensaje.'); return; }
+  if (M.para==='elegir' && !datos.destinatarios.length && !extra){ toast('Elige al menos un comercial o marca «Todos».'); return; }
+  $('mGuardar').disabled = true;
+  send('guardarAviso', datos);
+}
+function renderAvisos(){
+  var h = '';
+  if (!M.avisos.length) h = '<div class="res-empty">Todavía no hay avisos.</div>';
+  M.avisos.forEach(function(a){
+    var estado = !a.activo ? 'Apagado' : (a.caducado ? 'Caducado' : 'Visible');
+    var para = a.destinatarios.length ? a.destinatarios.map(function(d){ return d.nombre; }).join(', ') : 'Todos';
+    h += '<div class="res-item"'+(a.activo && !a.caducado ? '' : ' style="opacity:.6"')+'>' +
+      '<div class="res-main"><div class="res-title" style="white-space:normal;font-weight:500">'+esc(a.mensaje)+'</div>' +
+      '<div class="res-sub" style="white-space:normal">'+esc(estado)+' · Para: '+esc(para)+' · '+fechaLarga(a.fecha)+(a.hasta ? ' · hasta '+fechaLarga(a.hasta) : '')+'</div>' +
+      '<div class="actions" style="margin-top:6px"><button class="link" data-editar="'+esc(a.id)+'">Editar</button>' +
+      '<button class="link" data-onoff="'+esc(a.id)+'">'+(a.activo ? 'Apagar' : 'Encender')+'</button></div>' +
+      '</div></div>';
+  });
+  $('listaAvisos').innerHTML = h;
+  notifyHeight();
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * 4. ANÁLISIS
+ * ═════════════════════════════════════════════════════════════════════════ */
+function pedirBarometro(){
+  N.desde = $('nDesde').value; N.hasta = $('nHasta').value;
+  marcarChips('chipsN', N.desde, N.hasta);
+  $('kpis').innerHTML = '<div class="cargando">Cargando…</div>';
+  send('barometro', { desde:N.desde, hasta:N.hasta });
+}
+function claveLectura(){ return N.desde + '_' + N.hasta + '_' + (N.ver || 'equipo'); }
+function datosVer(){
+  if (!N.b) return null;
+  if (!N.ver) return N.b.equipo;
+  for (var i=0;i<N.b.porComercial.length;i++){ if (N.b.porComercial[i].comercialId===N.ver) return N.b.porComercial[i]; }
+  return null;
+}
+function renderBarometro(){
+  var e = N.b.equipo;
+  var k = [
+    ['Reuniones', e.reuniones, ''], ['Positivas', e.positivas, 'positiva'], ['Negativas', e.negativas, 'negativa'],
+    ['Oportunidades', e.oportunidades, 'oportunidad'], ['Seguimiento', e.seguimientos, 'seguimiento'],
+    ['Vencidos', e.vencidos, 'vencido'], ['Pedidos', e.pedidos, '', e.importePedidos ? euros(e.importePedidos) : '']
+  ];
+  $('kpis').innerHTML = '<div class="kpis">' + k.map(function(x){
+    return '<div class="kpi '+x[2]+'"><div class="n">'+esc(x[1])+'</div><div class="t">'+x[0]+'</div>' +
+      (x[3] ? '<div class="t" style="text-transform:none;color:var(--fg2);font-weight:600">'+esc(x[3])+'</div>' : '') + '</div>';
+  }).join('') + '</div>' + (e.llegadasSinInforme ? '<p class="hint" style="margin-top:8px">'+e.llegadasSinInforme+' llegada(s) sin informe en el periodo.</p>' : '');
+
+  var t = '<table class="tabla"><thead><tr><th>Comercial</th><th>Reuniones</th><th>Positivas</th><th>Negativas</th><th>Oportun.</th><th>Seguim.</th><th>Vencidos</th><th>Pedidos</th><th>Sin informe</th></tr></thead><tbody>';
+  t += '<tr class="click'+(N.ver===''?' sel':'')+'" data-ver=""><td><b>Todo el equipo</b></td><td>'+e.reuniones+'</td><td>'+e.positivas+'</td><td>'+e.negativas+'</td><td>'+e.oportunidades+'</td><td>'+e.seguimientos+'</td><td>'+e.vencidos+'</td><td>'+e.pedidos+'</td><td>'+e.llegadasSinInforme+'</td></tr>';
+  N.b.porComercial.forEach(function(c){
+    t += '<tr class="click'+(N.ver===c.comercialId?' sel':'')+'" data-ver="'+esc(c.comercialId)+'"><td>'+esc(c.comercial)+'</td><td>'+c.reuniones+'</td><td>'+c.positivas+'</td><td>'+c.negativas+'</td><td>'+c.oportunidades+'</td><td>'+c.seguimientos+'</td><td>'+c.vencidos+'</td><td>'+c.pedidos+'</td><td>'+c.llegadasSinInforme+'</td></tr>';
+  });
+  $('porComercial').innerHTML = t + '</tbody></table>';
+  renderDesglose();
+}
+function barras(titulo, mapa, campo){
+  var claves = Object.keys(mapa || {}).sort(function(a, b){ return mapa[b] - mapa[a]; });
+  var max = 0; claves.forEach(function(k){ if (mapa[k] > max) max = mapa[k]; });
+  var h = '<div><h4 style="margin-top:0">'+titulo+'</h4>';
+  if (!claves.length) return h + '<div class="hint">—</div></div>';
+  claves.forEach(function(k){
+    var nombre = campo==='resultado' ? res(k) : (campo ? et(campo, k) : k);
+    if (k==='sin_dato') nombre = 'Sin dato';
+    h += '<div class="barra"><div>'+esc(nombre)+'<div class="b"><i style="width:'+Math.round(100*mapa[k]/max)+'%"></i></div></div><div class="v">'+mapa[k]+'</div></div>';
+  });
+  return h + '</div>';
+}
+function renderDesglose(){
+  var d = datosVer(); if (!d) return;
+  var nombre = N.ver ? (d.comercial || nombreUsuario(N.ver)) : 'Todo el equipo';
+  $('dTitulo').textContent = 'Detalle · ' + nombre;
+  $('lTitulo').textContent = 'Lectura del periodo · ' + nombre;
+  var productos = {}; (d.productos || []).forEach(function(p){ productos[p.nombre] = p.veces; });
+  $('desglose').innerHTML =
+    barras('Resultados', d.resultados, 'resultado') +
+    barras('Alertas', d.alertas, 'alertas') +
+    barras('Objeciones', d.objeciones, 'objeciones') +
+    barras('Lo que valoran los clientes', d.valora, 'valora') +
+    barras('Dudas de trabajo', d.dudasTrabajo, 'dudasTrabajo') +
+    barras('Peticiones a otros departamentos', d.peticiones, 'responsable') +
+    barras('Productos más nombrados', productos, '');
+  renderLectura();
+  notifyHeight();
+}
+/* Markdown mínimo de la lectura: ## títulos, listas con «- », **negrita**. */
+function md(texto){
+  var lineas = String(texto||'').split('\n'); var h = ''; var enLista = false;
+  function inl(s){ return esc(s).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>'); }
+  lineas.forEach(function(l){
+    var t = l.trim();
+    if (/^#{1,6}\s/.test(t)){ if (enLista){ h += '</ul>'; enLista = false; } h += '<h2>'+inl(t.replace(/^#{1,6}\s*/, ''))+'</h2>'; return; }
+    if (/^[-*]\s/.test(t)){ if (!enLista){ h += '<ul>'; enLista = true; } h += '<li>'+inl(t.replace(/^[-*]\s*/, ''))+'</li>'; return; }
+    if (enLista){ h += '</ul>'; enLista = false; }
+    if (t) h += '<p>'+inl(t)+'</p>';
+  });
+  if (enLista) h += '</ul>';
+  return h;
+}
+function renderLectura(){
+  var l = N.lecturas[claveLectura()];
+  if (!l){ $('lectura').innerHTML = ''; $('btnLectura').textContent = 'Preparar lectura'; return; }
+  if (l.pidiendo){ $('lectura').innerHTML = '<div class="cargando">Preparando la lectura…</div>'; return; }
+  $('btnLectura').textContent = 'Volver a preparar';
+  $('lectura').innerHTML = '<div class="lectura" style="margin-top:12px">'+md(l.texto)+'</div>' +
+    '<div class="nota-ia">Preparada por IA con '+l.visitas+' visita(s) del '+fechaLarga(l.desde)+' al '+fechaLarga(l.hasta)+'. Revisa los datos antes de decidir.</div>';
+  notifyHeight();
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+ * MENSAJES  (Page → Widget)
+ * ═════════════════════════════════════════════════════════════════════════ */
+function errorDe(p){ return (p && p.error) || 'desconocido'; }
+function esAcceso(p){ return p && p.error && /acceso|sesión/i.test(p.error); }
+
+window.addEventListener('message', function(event){
+  var msg = event.data;
+  if (!msg || typeof msg!=='object') return;
+  var p = msg.payload;
+
+  if (msg.type==='cargado'){
+    if (!p || !p.ok){
+      if (esAcceso(p)) return bloquear(p.error);
+      $('sbEstado').textContent = 'Error de carga';
+      toast('Error: ' + errorDe(p), 5000);
+      return;
+    }
+    var primera = !HOY;
+    HOY = p.hoy;
+    U.usuarios = p.usuarios || [];
+    $('sbEstado').textContent = 'Datos de hoy, ' + fechaLarga(HOY);
+    if (primera){
+      $('aDesde').value = sumarDias(HOY, -6); $('aHasta').value = HOY; $('aDesde').max = HOY; $('aHasta').max = HOY;
+      $('nDesde').value = sumarDias(HOY, -29); $('nHasta').value = HOY; $('nDesde').max = HOY; $('nHasta').max = HOY;
+      $('mHasta').min = HOY;
+    }
+    renderUsuarios();
+    if (M.para==='elegir') renderPara();
+    var activa = document.querySelector('.tab.on').getAttribute('data-tab');
+    if (primera && activa!=='usuarios'){ cargadas[activa] = false; irA(activa); }
+    return;
+  }
+
+  if (msg.type==='equipo'){
+    if (!p || !p.ok){ toast('Error: ' + errorDe(p), 5000); return; }
+    U.equipo = p.equipo || [];
+    renderAlta();
+    return;
+  }
+
+  if (msg.type==='appActivada'){
+    if (!p || !p.ok){
+      U.ocupado = {};
+      renderUsuarios(); renderAlta();
+      toast('Error: ' + errorDe(p), 5000);
+      return;
+    }
+    delete U.ocupado[p.id];
+    if (U.equipo){
+      U.equipo.forEach(function(x){ if (x.id===p.id) x.appVentas = p.appVentas; });
+      renderAlta();
+    }
+    toast(p.appVentas ? 'App activada.' : 'App desactivada.');
+    send('ready', {});   // recarga usuarios con su última visita
+    return;
+  }
+
+  if (msg.type==='visitas'){
+    if (!p || !p.ok){ $('listaVisitas').innerHTML = '<div class="res-empty">'+esc(errorDe(p))+'</div>'; return; }
+    A.visitas = p.visitas || [];
+    renderVisitas();
+    return;
+  }
+
+  if (msg.type==='visita'){
+    if (!p || !p.ok){ toast('Error: ' + errorDe(p), 5000); return; }
+    renderDetalle(p.visita);
+    return;
+  }
+
+  if (msg.type==='proximas'){ renderProximas(p); return; }
+
+  if (msg.type==='avisos'){
+    if (!p || !p.ok){ $('listaAvisos').innerHTML = '<div class="res-empty">'+esc(errorDe(p))+'</div>'; return; }
+    M.avisos = p.avisos || [];
+    renderAvisos();
+    return;
+  }
+
+  if (msg.type==='avisoGuardado'){
+    $('mGuardar').disabled = false;
+    if (!p || !p.ok){ toast('Error: ' + errorDe(p), 5000); return; }
+    toast('Aviso guardado.');
+    limpiarAviso();
+    send('avisos', {});
+    return;
+  }
+
+  if (msg.type==='barometro'){
+    if (!p || !p.ok){ $('kpis').innerHTML = '<div class="res-empty">'+esc(errorDe(p))+'</div>'; return; }
+    N.b = p;
+    var sigue = !N.ver || p.porComercial.some(function(c){ return c.comercialId===N.ver; });
+    if (!sigue) N.ver = '';
+    renderBarometro();
+    return;
+  }
+
+  if (msg.type==='lectura'){
+    $('btnLectura').disabled = false;
+    var pend = null;
+    Object.keys(N.lecturas).forEach(function(k){ if (N.lecturas[k].pidiendo) pend = k; });
+    if (!p || !p.ok){
+      if (pend) delete N.lecturas[pend];
+      renderLectura();
+      toast('Error: ' + errorDe(p), 5000);
+      return;
+    }
+    var l = p.lectura;
+    N.lecturas[l.desde + '_' + l.hasta + '_' + (l.comercialId || 'equipo')] = l;
+    renderLectura();
+    return;
+  }
+
+  if (msg.type==='reinterpretado'){
+    if (!p || !p.ok){
+      reEnCurso = false; $('btnReinterpretar').disabled = false;
+      $('reEstado').textContent = '';
+      toast('Error: ' + errorDe(p), 6000);
+      return;
+    }
+    reCortes = 0;
+    if (p.quedan > 0 && p.hechas > 0){
+      $('reEstado').textContent = 'Quedan ' + p.quedan + '…';
+      send('reinterpretar', { max: 2 });
+      return;
+    }
+    reEnCurso = false; $('btnReinterpretar').disabled = false;
+    $('reEstado').textContent = p.quedan > 0
+      ? ('Quedan ' + p.quedan + ' que no se pudieron completar. Vuelve a intentarlo más tarde.')
+      : 'Todos los informes están completos.';
+    if (N.b) pedirBarometro();
+    return;
+  }
+
+  if (msg.type==='error'){
+    // Excepción en el puente (p. ej. la lectura superó el tiempo de conexión).
+    if (p && p.origen==='lectura'){
+      $('btnLectura').disabled = false;
+      Object.keys(N.lecturas).forEach(function(k){ if (N.lecturas[k].pidiendo) delete N.lecturas[k]; });
+      renderLectura();
+      toast('La lectura ha tardado demasiado. Vuelve a pedirla.', 6000);
+      return;
+    }
+    if (p && p.origen==='reinterpretar' && reEnCurso){
+      // Un lote que se corta no pierde nada (lo guardado, guardado está): se
+      // sigue de uno en uno. Tras 3 cortes seguidos, se para.
+      reCortes++;
+      if (reCortes <= 3){ send('reinterpretar', { max: 1 }); return; }
+      reEnCurso = false; $('btnReinterpretar').disabled = false;
+      $('reEstado').textContent = 'Se ha cortado la conexión varias veces. Vuelve a intentarlo más tarde.';
+      return;
+    }
+    if (p && p.origen==='guardarAviso') $('mGuardar').disabled = false;
+    if (p && p.origen==='activarApp'){ U.ocupado = {}; renderUsuarios(); renderAlta(); }
+    toast('Error: ' + errorDe(p), 5000);
+    return;
+  }
+});
+
+/* ── Cableado fijo ───────────────────────────────────────────────────── */
+document.querySelector('.tabs').addEventListener('click', function(e){
+  var b = e.target.closest('[data-tab]'); if (b) irA(b.getAttribute('data-tab'));
+});
+
+// Usuarios
+$('listaUsuarios').addEventListener('click', function(e){
+  var b = e.target.closest('[data-quitar]'); if (!b) return;
+  var id = b.getAttribute('data-quitar');
+  if (!confirm('¿Desactivar la app a ' + (nombreUsuario(id) || 'esta persona') + '? Dejará de poder entrar al momento.')) return;
+  cambiarApp(id, false);
+});
+$('btnAlta').addEventListener('click', function(){
+  $('capaAlta').classList.add('on'); $('buscaAlta').value = '';
+  U.equipo = null; renderAlta(); send('equipo', {});
+});
+$('cerrarAlta').addEventListener('click', function(){ $('capaAlta').classList.remove('on'); });
+$('capaAlta').addEventListener('click', function(e){ if (e.target===this) this.classList.remove('on'); });
+$('buscaAlta').addEventListener('input', renderAlta);
+$('listaAlta').addEventListener('click', function(e){
+  var b = e.target.closest('[data-activar]'); if (!b) return;
+  cambiarApp(b.getAttribute('data-activar'), true);
+});
+
+// Actividad
+$('aResultado').innerHTML = '<option value="">Todos los resultados</option>' + Object.keys(RESULTADOS).map(function(k){ return '<option value="'+k+'">'+RESULTADOS[k]+'</option>'; }).join('');
+$('aSituacion').innerHTML = '<option value="">Todas las situaciones</option>' + SITUACIONES.map(function(s){ return '<option value="'+s.k+'">'+s.label+'</option>'; }).join('');
+chipsPeriodo('chipsA', function(d, h){ $('aDesde').value = d; $('aHasta').value = h; pedirVisitas(); });
+['aDesde','aHasta','aComercial','aResultado','aSituacion'].forEach(function(id){ $(id).addEventListener('change', pedirVisitas); });
+function abrirVisita(e){
+  var it = e.target.closest('[data-visita]'); if (!it) return;
+  A.selId = it.getAttribute('data-visita');
+  renderVisitas();
+  $('detalle').innerHTML = '<h3>Informe de la visita</h3><div class="cargando">Cargando…</div>';
+  send('visita', { id: A.selId });
+}
+$('listaVisitas').addEventListener('click', abrirVisita);
+$('proximas').addEventListener('click', abrirVisita);
+
+// Mensajes
+$('mPara').addEventListener('click', function(e){
+  var b = e.target.closest('[data-para]'); if (!b) return;
+  M.para = b.getAttribute('data-para'); renderPara();
+});
+$('mElegidos').addEventListener('click', function(e){
+  var b = e.target.closest('[data-elegir]'); if (!b) return;
+  var id = b.getAttribute('data-elegir');
+  if (M.elegidos[id]!==undefined) delete M.elegidos[id]; else M.elegidos[id] = nombreUsuario(id);
+  renderPara();
+});
+$('mGuardar').addEventListener('click', function(){ guardarAviso(); });
+$('mCancelar').addEventListener('click', limpiarAviso);
+$('listaAvisos').addEventListener('click', function(e){
+  var ed = e.target.closest('[data-editar]');
+  if (ed){ editarAviso(ed.getAttribute('data-editar')); return; }
+  var oo = e.target.closest('[data-onoff]'); if (!oo) return;
+  var id = oo.getAttribute('data-onoff');
+  var a = null; for (var i=0;i<M.avisos.length;i++){ if (M.avisos[i].id===id){ a = M.avisos[i]; break; } }
+  if (!a) return;
+  send('guardarAviso', { id:a.id, mensaje:a.mensaje, hasta:a.hasta || '', activo:!a.activo, destinatarios:a.destinatarios.map(function(d){ return d.id; }) });
+});
+
+// Análisis
+chipsPeriodo('chipsN', function(d, h){ $('nDesde').value = d; $('nHasta').value = h; pedirBarometro(); });
+['nDesde','nHasta'].forEach(function(id){ $(id).addEventListener('change', pedirBarometro); });
+$('porComercial').addEventListener('click', function(e){
+  var tr = e.target.closest('[data-ver]'); if (!tr) return;
+  N.ver = tr.getAttribute('data-ver');
+  renderBarometro();
+});
+$('btnLectura').addEventListener('click', function(){
+  if (!N.b) return;
+  N.lecturas[claveLectura()] = { pidiendo:true };
+  $('btnLectura').disabled = true;
+  renderLectura();
+  send('lectura', { desde:N.desde, hasta:N.hasta, comercialId:N.ver });
+});
+$('btnReinterpretar').addEventListener('click', function(){
+  if (reEnCurso) return;
+  reEnCurso = true; reCortes = 0; this.disabled = true;
+  $('reEstado').textContent = 'Completando…';
+  send('reinterpretar', { max: 2 });
+});
+
+/* ── Alto del iframe (el del Gestor de equipo) ───────────────────────── */
+var lastH = 0;
+function notifyHeight(){
+  var h = document.documentElement.scrollHeight;
+  if (h!==lastH){ lastH = h; send('resize', {height:h}); }
+}
+try {
+  var ro = new ResizeObserver(notifyHeight); ro.observe(document.body);
+} catch (e) {
+  window.addEventListener('resize', notifyHeight);
+  setInterval(notifyHeight, 1200);
+}
+
+send('ready', {});
+</script>
+</body>
+</html>
