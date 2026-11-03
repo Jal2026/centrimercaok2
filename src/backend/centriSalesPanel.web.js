@@ -1,8 +1,16 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRIX · Panel de la App de Ventas (Wix Velo)
  * Archivo:  backend/centriSalesPanel.web.js
- * VERSION:  1.0.1
- * FECHA:    2 Noviembre 2026
+ * VERSION:  1.0.2
+ * FECHA:    3 Noviembre 2026
+ *
+ * v1.0.2 — 3 NOV 2026 · MAPA DE VISITAS (plan del 21-oct: Google Maps).
+ *   Único cambio: panelCargar() devuelve además `claveMapa`, la clave de
+ *   Google Maps JavaScript API guardada en el secret GOOGLE_MAPS_KEY. Si el
+ *   secret no existe, `claveMapa` va vacía y el widget dibuja el mapa con
+ *   OpenStreetMap. La clave de Maps JavaScript es de navegador por diseño:
+ *   se protege restringiéndola en Google Cloud (solo Maps JavaScript API y
+ *   solo los dominios del panel), no ocultándola. Page code sin cambios.
  *
  * v1.0.1 — 2 NOV 2026 · Único cambio: un resultado «oferta» guardado antes
  *   de centriSalesLab 1.5.1 cuenta como «ventas» (decisión de Jal del 25-oct:
@@ -120,7 +128,7 @@ import { fetch } from 'wix-fetch';
 import { getSecret } from 'wix-secrets-backend';
 import { informePruebaCore } from 'backend/centriSalesLab.web';
 
-const VERSION = '1.0.1';
+const VERSION = '1.0.2';
 const TAG = `[CentriSalesPanel][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -198,6 +206,15 @@ const SECRET_ANTHROPIC   = 'CENTRIMERCA';
 const MAX_TOKENS_LECTURA = 1400;
 const MAX_VISITAS_LECTURA = 40;      // muestra de visitas que recibe la IA
 const MAX_LOTE = 3;                  // reinterpretaciones por llamada (corte de ~14 s)
+
+// ── Mapa (v1.0.2) ──────────────────────────────────────────────────────────
+const SECRET_MAPA = 'GOOGLE_MAPS_KEY';   // clave de Google Maps JavaScript API (opcional)
+
+/** Clave del mapa, o '' si el secret no existe (el widget usa OpenStreetMap). */
+async function _claveMapa() {
+  try { return _txt(await getSecret(SECRET_MAPA)); }
+  catch (e) { return ''; }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONTROL DE ACCESO  (copia literal de centriEquipo.web.js 1.0.5)
@@ -600,7 +617,7 @@ export const panelCargar = webMethod(
         u.ultimaVisita = ref ? { dia: _diaMadrid(ref), hora: _horaMadrid(ref), cliente: _txt(ult[F.cliente]) } : null;
       });
 
-      return { ok: true, version: VERSION, hoy, usuarios };
+      return { ok: true, version: VERSION, hoy, usuarios, claveMapa: await _claveMapa() };   // v1.0.2
     } catch (e) {
       console.error(`${TAG} ❌ panelCargar:`, e);
       return { ok: false, error: 'No se pudieron leer los usuarios de la app.', detalle: safeErr(e) };
