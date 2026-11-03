@@ -1,8 +1,24 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * CENTRIMERCA — CENTRIX · Panel de la App de Ventas (Wix Velo)
  * Archivo:  backend/centriSalesPanel.web.js
- * VERSION:  1.0.2
+ * VERSION:  1.0.3
  * FECHA:    3 Noviembre 2026
+ *
+ * v1.0.3 — 3 NOV 2026 · DIRECCIÓN DEL CLIENTE EN EL MAPA (Jal: «sea cierto o
+ *   no, quiero que se vea la ubicación de la dirección de la base de datos
+ *   del cliente»). Único cambio: panelVisitas() devuelve además `fichas`,
+ *   { contactId → { negocio, direccion:{ linea, cp, ciudad, provincia },
+ *   texto, ubicacion } } de los clientes de las visitas. El widget sitúa la
+ *   dirección en el mapa; aquí no se calcula nada ni se escribe en los
+ *   contactos. Si los contactos no se pueden leer, las visitas salen igual
+ *   (fichas vacío).
+ *   Procedencia: _clavesEtiquetas(), el volcado paginado de queryContacts,
+ *   _valorCampo(), _coordenadas(), F_LATITUD/F_LONGITUD, DECIMALES_COORD,
+ *   ETIQUETA_CLIENTE/PROSPECTO y la lectura de la dirección (addressLine o
+ *   streetAddress.name, city, formatted): COPIA de centriSalesClientes.web.js
+ *   1.5.0. El código postal sale de `postalCode` o, si no llega, de
+ *   `formatted` (las cinco cifras). Provincia: campo personalizado
+ *   custom.provincia (leído por API el 3-nov). Caché en memoria de 10 min.
  *
  * v1.0.2 — 3 NOV 2026 · MAPA DE VISITAS (plan del 21-oct: Google Maps).
  *   Único cambio: panelCargar() devuelve además `claveMapa`, la clave de
@@ -127,8 +143,10 @@ import { currentMember } from 'wix-members-backend';
 import { fetch } from 'wix-fetch';
 import { getSecret } from 'wix-secrets-backend';
 import { informePruebaCore } from 'backend/centriSalesLab.web';
+import { elevate } from 'wix-auth';             // v1.0.3 — como centriSalesClientes.web.js
+import { contacts } from 'wix-crm-backend';     // v1.0.3 — como centriSalesClientes.web.js
 
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const TAG = `[CentriSalesPanel][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -206,6 +224,17 @@ const SECRET_ANTHROPIC   = 'CENTRIMERCA';
 const MAX_TOKENS_LECTURA = 1400;
 const MAX_VISITAS_LECTURA = 40;      // muestra de visitas que recibe la IA
 const MAX_LOTE = 3;                  // reinterpretaciones por llamada (corte de ~14 s)
+
+// ── Fichas de clientes (v1.0.3) — copia de centriSalesClientes.web.js 1.5.0 ──
+const F_LATITUD  = 'custom.latitud';
+const F_LONGITUD = 'custom.longitud';
+const F_PROVINCIA = 'custom.provincia';   // leído por API el 3-nov-2026
+const DECIMALES_COORD = 6;   // comprobado en el site: guarda y devuelve 6
+const ETIQUETA_CLIENTE   = 'Cliente';
+const ETIQUETA_PROSPECTO = 'Prospecto';
+const CACHE_FICHAS_MS = 10 * 60 * 1000;
+let _cacheFichas = null;
+let _cacheFichasTs = 0;
 
 // ── Mapa (v1.0.2) ──────────────────────────────────────────────────────────
 const SECRET_MAPA = 'GOOGLE_MAPS_KEY';   // clave de Google Maps JavaScript API (opcional)
@@ -586,6 +615,131 @@ async function _leerEquipo() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// FICHAS DE CLIENTES (v1.0.3) — para situar su dirección en el mapa
+// ═══════════════════════════════════════════════════════════════════════════
+
+// COPIA LITERAL de centriSalesClientes.web.js 1.5.0:
+// extendedFields llega PLANO en wix-crm-backend (crmToolsLogic lee
+// c.info.extendedFields['custom.sexo']) y como { items: {...} } en la API de
+// contactos v4 (leído por API el 25-oct). Se aceptan las dos formas.
+function _valorCampo(ef, key) {
+  if (!ef || typeof ef !== 'object') return undefined;
+  if (ef[key] !== undefined) return ef[key];
+  if (ef.items && typeof ef.items === 'object' && ef.items[key] !== undefined) return ef.items[key];
+  return undefined;
+}
+
+/** { lat, lon } redondeado a DECIMALES_COORD, o null si falta o no es válido. (COPIA LITERAL) */
+function _coordenadas(lat, lon) {
+  if (lat === null || lat === undefined || lat === '' || lon === null || lon === undefined || lon === '') return null;
+  const la = Number(lat);
+  const lo = Number(lon);
+  if (!isFinite(la) || !isFinite(lo)) return null;
+  if (la < -90 || la > 90 || lo < -180 || lo > 180) return null;
+  const f = Math.pow(10, DECIMALES_COORD);
+  return { lat: Math.round(la * f) / f, lon: Math.round(lo * f) / f };
+}
+
+/** Claves de las dos etiquetas, resueltas por nombre (patrón adserverLogic). (COPIA LITERAL) */
+async function _clavesEtiquetas() {
+  const findLabel = elevate(contacts.findOrCreateLabel);
+  const [rC, rP] = await Promise.all([
+    findLabel(ETIQUETA_CLIENTE),
+    findLabel(ETIQUETA_PROSPECTO)
+  ]);
+  return { cliente: rC.label.key, prospecto: rP.label.key };
+}
+
+/** Ficha mínima de un contacto: nombre, dirección y ubicación guardada. */
+function _fichaDe(contact) {
+  const infoName = contact?.info?.name || {};
+  const nombre = infoName.first || contact?.name?.first || contact?.firstName || '';
+  const apellido = infoName.last || contact?.name?.last || contact?.lastName || '';
+  const negocio = `${nombre} ${apellido}`.trim() || _txt(contact?.info?.company);
+  const dirArray = contact?.info?.addresses || [];
+  const dir0 = (Array.isArray(dirArray) && dirArray[0] && dirArray[0].address) || {};
+  // Igual que formatearContacto(): la importación guarda addressLine + city;
+  // el alta desde la app guarda streetAddress.name + formatted.
+  const calle = dir0.addressLine || (dir0.streetAddress && dir0.streetAddress.name) || '';
+  const formateada = String(dir0.formatted || '').split('\n').map(x => x.trim()).filter(Boolean).join(', ');
+  const cpTexto = String(dir0.formatted || '').match(/\b\d{5}\b/);
+  const cp = _txt(dir0.postalCode) || (cpTexto ? cpTexto[0] : '');
+  const ef = contact?.info?.extendedFields;
+  return {
+    contactId: contact._id || contact.id,
+    negocio,
+    direccion: {
+      linea: _txt(calle),
+      cp,
+      ciudad: _txt(dir0.city),
+      provincia: _txt(_valorCampo(ef, F_PROVINCIA))
+    },
+    texto: formateada || [calle, dir0.city].filter(Boolean).join(', '),
+    ubicacion: _coordenadas(_valorCampo(ef, F_LATITUD), _valorCampo(ef, F_LONGITUD))
+  };
+}
+
+/**
+ * Todas las fichas con etiqueta Cliente o Prospecto, por contactId.
+ * Volcado paginado y filtro por etiqueta: COPIA de _cargarClientes() de
+ * centriSalesClientes.web.js 1.5.0. Caché en memoria CACHE_FICHAS_MS.
+ */
+async function _cargarFichas() {
+  const ahora = Date.now();
+  if (_cacheFichas && (ahora - _cacheFichasTs) < CACHE_FICHAS_MS) return _cacheFichas;
+
+  const claves = await _clavesEtiquetas();
+  const elevatedQuery = elevate(contacts.queryContacts);
+  const porId = {};
+  let hasMore = true;
+  let skip = 0;
+  const pageSize = 1000;
+
+  while (hasMore) {
+    const result = await elevatedQuery()
+      .hasSome('info.labelKeys', [claves.cliente, claves.prospecto])
+      .skip(skip)
+      .limit(pageSize)
+      .find({ suppressAuth: true });
+
+    const items = result?.items || [];
+    for (const c of items) {
+      const fi = _fichaDe(c);
+      if (fi.contactId) porId[fi.contactId] = fi;
+    }
+
+    if (items.length < pageSize) {
+      hasMore = false;
+    } else {
+      skip += pageSize;
+    }
+
+    if (skip >= 10000) {
+      console.warn(`${TAG} límite de seguridad alcanzado (10.000)`);
+      hasMore = false;
+    }
+  }
+
+  _cacheFichas = porId;
+  _cacheFichasTs = ahora;
+  console.log(`${TAG} fichas de clientes cargadas: ${Object.keys(porId).length} en ${Date.now() - ahora} ms`);
+  return porId;
+}
+
+/** Fichas de los clientes de unas visitas. Si falla, {} (las visitas salen igual). */
+async function _fichasDe(filas) {
+  try {
+    const todas = await _cargarFichas();
+    const out = {};
+    filas.forEach((f) => { if (f.contactId && todas[f.contactId]) out[f.contactId] = todas[f.contactId]; });
+    return out;
+  } catch (e) {
+    console.error(`${TAG} no se pudieron leer las fichas de los clientes:`, e.message);
+    return {};
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 1. USUARIOS
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -692,7 +846,7 @@ export const panelVisitas = webMethod(
       if (_txt(situacion)) filas = filas.filter((f) => f.situaciones[_txt(situacion)]);
 
       filas.sort((a, b) => (b.dia + b.hora).localeCompare(a.dia + a.hora));
-      return { ok: true, desde, hasta, visitas: filas };
+      return { ok: true, desde, hasta, visitas: filas, fichas: await _fichasDe(filas) };   // v1.0.3
     } catch (e) {
       console.error(`${TAG} ❌ panelVisitas:`, e);
       return { ok: false, error: 'No se pudieron leer las visitas.', detalle: safeErr(e) };
